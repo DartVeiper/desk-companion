@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DeskAgent</AssemblyName>
+    <RootNamespace>DeskAgent</RootNamespace>
+    <!-- Один самодостаточный exe: ставить рантайм на игровой ПК не нужно,
+         а PyInstaller-сборку Python-версии Defender считал бы кейлоггером. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Ради этой библиотеки агент и написан на C#: из Python пришлось бы
+         держать запущенным само приложение LHM и парсить его веб-сервер. -->
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.3" />
+  </ItemGroup>
+
+</Project>

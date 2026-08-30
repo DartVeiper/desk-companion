@@ -1,0 +1,487 @@
+"""Тесты сервисного цикла и источников. Сеть не нужна: py app/test_main.py"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.main import Application, Recorder
+from app.display.preview import PreviewDisplay
+from app.sources import ManualResetSource, mqtt
+from app.sources.base import Source
+from app.sources.weather import HORIZON_MINUTES, RAIN_MM, rain_in_minutes
+from app.state import State
+from app import settings as settings_mod
+from app import status as status_mod
+from app.db import Database
+from app.drivers import ld2410, scd41
+from app.inputs.events import Action, EventBus
+from app.inputs.gestures import GestureRecognizer
+from app.sources.sensors import Ld2410Source, Scd41Source, TouchSource
+
+failed = 0
+
+
+def check(name: str, got, expected) -> None:
+    global failed
+    ok = got == expected
+    if not ok:
+        failed += 1
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {name:46} {got}")
+
+
+def buckets(now: datetime, values: list[float], step: int = 15) -> dict:
+    return {
+        "time": [(now + timedelta(minutes=step * i)).isoformat(timespec="minutes")
+                 for i in range(len(values))],
+        "precipitation": values,
+    }
+
+
+print("Прогноз дождя")
+now = datetime(2026, 8, 19, 12, 0)
+check("сухо", rain_in_minutes(buckets(now, [0, 0, 0, 0]), now), None)
+check("дождь во втором интервале", rain_in_minutes(buckets(now, [0, 0.8, 0]), now), 15)
+check("дождь в четвёртом", rain_in_minutes(buckets(now, [0, 0, 0, 1.2]), now), 45)
+check(f"морось ниже порога {RAIN_MM}", rain_in_minutes(buckets(now, [0.05, 0.1]), now), None)
+check("нет данных", rain_in_minutes(None, now), None)
+check("пустые значения", rain_in_minutes(buckets(now, [None, None]), now), None)
+far = buckets(now, [0] * 8 + [3.0])
+check(f"дальше {HORIZON_MINUTES} мин — не новость", rain_in_minutes(far, now), None)
+
+print("\nОтступ после отказа источника")
+
+
+class Flaky(Source):
+    name = "flaky"
+    interval = 900.0
+    retry_after = 10.0
+
+    def __init__(self, fail_times: int) -> None:
+        super().__init__()
+        self.left = fail_times
+        self.calls = 0
+
+    def poll(self, state: State) -> bool:
+        self.calls += 1
+        if self.left > 0:
+            self.left -= 1
+            raise RuntimeError("сеть моргнула")
+        return True
+
+
+s = State()
+flaky = Flaky(fail_times=3)
+flaky.tick(s)
+check("первый отказ пойман, сервис жив", (flaky.ok, flaky.failures), (False, 1))
+check("повтор не через interval, а через retry_after", round(flaky._backoff), 10)
+flaky._next_at = 0
+flaky.tick(s)
+check("отступ удвоился", round(flaky._backoff), 20)
+flaky._next_at = 0
+flaky.tick(s)
+check("и ещё раз", round(flaky._backoff), 40)
+flaky._next_at = 0
+flaky.tick(s)
+check("успех сбрасывает счётчик", (flaky.ok, flaky.failures, flaky._backoff), (True, 0, 0.0))
+
+never = Flaky(fail_times=99)
+never.retry_after, never.interval = 400.0, 500.0
+never.tick(s)
+never._next_at = 0
+never.tick(s)
+check("отступ не перерастает interval", never._backoff, 500.0)
+
+print("\nЗапись в базу")
+with tempfile.TemporaryDirectory() as tmp:
+    db = Database(Path(tmp) / "r.db")
+    rec = Recorder(db)
+    st = State(now=datetime(2026, 8, 19, 10, 0, 5))
+    st.desk.presence = True
+    st.pc.category = "code"
+
+    rec.tick(st)
+    check("первая неполная минута не пишется",
+              db.conn.execute("SELECT COUNT(*) c FROM activity_minute").fetchone()["c"], 0)
+    check("замер воздуха без CO2 не пишется",
+          len(db.env_between(datetime(2026, 8, 19), datetime(2026, 8, 20))), 0)
+
+    st.env.co2, st.env.temperature, st.env.humidity = 700, 22.5, 44.0
+    rec.tick(st)
+    check("замер воздуха записан", len(db.env_between(datetime(2026, 8, 19), datetime(2026, 8, 20))), 1)
+
+    st.now = datetime(2026, 8, 19, 10, 1, 5)
+    rec.tick(st)
+    check("минута закрылась — строка появилась",
+              db.conn.execute("SELECT COUNT(*) c FROM activity_minute").fetchone()["c"], 1)
+    check("следующий замер ждёт 10 минут",
+          len(db.env_between(datetime(2026, 8, 19), datetime(2026, 8, 20))), 1)
+
+    st.now = datetime(2026, 8, 19, 10, 12, 0)
+    rec.tick(st)
+    check("через 10 минут записан", len(db.env_between(datetime(2026, 8, 19), datetime(2026, 8, 20))), 2)
+
+    st.desk.presence = False
+    rec.tick(st)
+    check("смена присутствия — событие",
+              db.conn.execute("SELECT COUNT(*) c FROM state_events").fetchone()["c"], 1)
+    rec.tick(st)
+    check("то же состояние второй раз — не событие",
+              db.conn.execute("SELECT COUNT(*) c FROM state_events").fetchone()["c"], 1)
+    # Windows не отдаёт файл, пока соединение живо, и временный каталог
+    # не удаляется. На Linux бы прошло молча — тем важнее закрыть явно.
+    db.close()
+
+print("\nАвтосброс ручного статуса")
+
+
+class Clock:
+    """Подменяемые часы: настоящее время в тестах цикла бесполезно."""
+
+    def __init__(self, start: datetime) -> None:
+        self.now = start
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, **kw) -> None:
+        self.now += timedelta(**kw)
+
+
+def force_tick(app: Application) -> bool:
+    """Шаг с принудительным опросом источников.
+
+    Источники планируются по монотонным часам — так и нужно, иначе прыжок
+    времени по NTP застопорил бы их все (у Pi нет RTC). Но тест двигает
+    поддельные настенные часы, а монотонные при этом почти стоят, поэтому
+    расписание приходится сбрасывать руками.
+    """
+    for source in app.sources:
+        source._next_at = 0.0
+    app._last_frame = 0.0
+    return app.tick()
+
+
+clock = Clock(datetime(2026, 8, 19, 10, 0))
+app = Application(PreviewDisplay(), sources=[ManualResetSource()], clock=clock)
+force_tick(app)
+app.state.desk.manual_status = "не беспокоить"
+app.state.desk.manual_until = datetime(2026, 8, 19, 15, 0)
+
+clock.advance(hours=4)
+force_tick(app)
+check("до срока держится", app.state.desk.manual_status, "не беспокоить")
+
+clock.advance(hours=1, seconds=1)
+check("сброс помечает кадр к перерисовке", force_tick(app), True)
+check("срок вышел — статус снят", app.state.desk.manual_status, None)
+check("таймер снят", app.state.desk.manual_until, None)
+
+print("\nЦикл")
+clock = Clock(datetime(2026, 8, 19, 10, 0, 0))
+app = Application(PreviewDisplay(), sources=[], clock=clock)
+check("первый шаг рисует кадр", app.tick(), True)
+app._last_frame = 0
+check("та же минута, ничего не изменилось — не рисуем", app.tick(), False)
+clock.advance(minutes=1)
+app._last_frame = 0
+check("сменилась минута — рисуем", app.tick(), True)
+clock.advance(seconds=10)
+check("пауза между кадрами соблюдается", app.tick(), False)
+
+print("\nMQTT: разбор сообщений из п.5")
+mst = State(now=datetime(2026, 8, 19, 12, 0))
+check("heartbeat отмечает ПК живым",
+      (mqtt.apply_message(mst, mqtt.HEARTBEAT, "1755600000"), mst.pc_online), (True, True))
+check("активное окно", (mqtt.apply_message(mst, mqtt.ACTIVE_APP,
+      '{"app":"rider64.exe","category":"code"}'), mst.pc.active_app), (True, "rider64.exe"))
+check("категория", mst.pc.category, "code")
+check("агрегат ввода", (mqtt.apply_message(mst, mqtt.ACTIVITY,
+      '{"keys":142,"clicks":38,"mouse_px":8420}'), mst.pc.keystrokes), (True, 142))
+check("звук включился",
+      (mqtt.apply_message(mst, mqtt.AUDIO, "1"), mst.pc.audio_active), (True, True))
+check("тот же звук второй раз — не изменение",
+      mqtt.apply_message(mst, mqtt.AUDIO, "1"), False)
+check("железо", (mqtt.apply_message(mst, mqtt.HARDWARE,
+      '{"gpu_temp":68,"gpu_load":92,"cpu_temp":54,"cpu_load":31}'), mst.pc.gpu_load), (True, 92.0))
+check("аномалия", (mqtt.apply_message(mst, mqtt.ANOMALY,
+      '{"flag":true,"reason":"сессия 5 ч без перерыва"}'), mst.pc.anomaly_flag), (True, True))
+check("причина аномалии", mst.pc.anomaly_reason, "сессия 5 ч без перерыва")
+
+check("битый JSON не роняет сервис", mqtt.apply_message(mst, mqtt.ACTIVITY, "{не json"), False)
+check("после битого прежнее значение цело", mst.pc.keystrokes, 142)
+check("пустая строка не роняет", mqtt.apply_message(mst, mqtt.HARDWARE, ""), False)
+check("чужой топик игнорируется", mqtt.apply_message(mst, "home/whatever", "1"), False)
+check("null в железе допустим",
+      (mqtt.apply_message(mst, mqtt.HARDWARE, '{"gpu_temp":null,"gpu_load":50}'),
+       mst.pc.gpu_temp), (True, None))
+
+print("\nMQTT: молчание агента ловится heartbeat")
+silent = State(now=datetime(2026, 8, 19, 12, 0))
+mqtt.apply_message(silent, mqtt.HEARTBEAT, "x")
+check("сразу после heartbeat — онлайн", silent.pc_online, True)
+silent.now = datetime(2026, 8, 19, 12, 1)
+check("через минуту ещё онлайн", silent.pc_online, True)
+silent.now = datetime(2026, 8, 19, 12, 5)
+check("через пять минут — офлайн", silent.pc_online, False)
+
+print("\nИсточник SCD41 поверх заглушки шины")
+
+
+class FakeI2c:
+    """Отвечает заранее заготовленными словами, запоминает команды."""
+
+    def __init__(self, co2: int = 700, ready: bool = True) -> None:
+        self.written: list[int] = []
+        self.co2, self.ready_flag = co2, ready
+
+    def write(self, address: int, payload: bytes) -> None:
+        self.written.append(int.from_bytes(payload[:2], "big"))
+
+    def read(self, address: int, count: int) -> bytes:
+        def word(value: int) -> bytes:
+            raw = value.to_bytes(2, "big")
+            return raw + bytes([scd41.crc8(raw)])
+
+        if count == 3:
+            return word(0x8007 if self.ready_flag else 0x8000)
+        return word(self.co2) + word(25000) + word(30000)
+
+
+bus_stub = FakeI2c()
+env_source = Scd41Source(scd41.Scd41(bus_stub.write, bus_stub.read, sleep=lambda _s: None))
+env_state = State(now=datetime(2026, 8, 19, 12, 0))
+check("первый опрос применён", env_source.tick(env_state), True)
+check("CO2 в состоянии", env_state.env.co2, 700)
+# Порядок принципиален: настроечные команды датчик принимает только до
+# start(), в периодическом режиме молча игнорирует.
+check("порядок настройки: стоп, ASC, persist, старт",
+      [hex(c) for c in bus_stub.written[:4]],
+      [hex(scd41.STOP_PERIODIC), hex(scd41.SET_ASC),
+       hex(scd41.PERSIST_SETTINGS), hex(scd41.START_PERIODIC)])
+
+not_ready = FakeI2c(ready=False)
+lazy = Scd41Source(scd41.Scd41(not_ready.write, not_ready.read, sleep=lambda _s: None))
+lazy._next_at = 0
+check("замер не готов — состояние не трогаем", lazy.tick(State()), False)
+
+zero = FakeI2c(co2=0)
+warmup = Scd41Source(scd41.Scd41(zero.write, zero.read, sleep=lambda _s: None))
+warmup_state = State()
+warmup_state.env.co2 = 650
+warmup._next_at = 0
+check("нулевой CO2 при прогреве отброшен", warmup.tick(warmup_state), False)
+check("прежнее значение не затёрто", warmup_state.env.co2, 650)
+check("отбраковка посчитана", warmup.rejected, 1)
+
+print("\nИсточник LD2410 поверх заглушки порта")
+
+
+class FakePort:
+    def __init__(self, stream: bytes) -> None:
+        self.stream, self.written = stream, b""
+        self.in_waiting = len(stream)
+
+    def read(self, count: int) -> bytes:
+        chunk, self.stream = self.stream[:count], self.stream[count:]
+        self.in_waiting = len(self.stream)
+        return chunk
+
+    def write(self, payload: bytes) -> None:
+        self.written += payload
+
+    def close(self) -> None:
+        pass
+
+
+def radar_frame(state_code: int, distance: int = 150) -> bytes:
+    payload = (bytes([ld2410.BASIC, 0xAA, state_code])
+               + distance.to_bytes(2, "little") + bytes([60])
+               + distance.to_bytes(2, "little") + bytes([50])
+               + distance.to_bytes(2, "little") + bytes([0x55, 0x00]))
+    return ld2410.DATA_HEAD + len(payload).to_bytes(2, "little") + payload + ld2410.DATA_TAIL
+
+
+radar_state = State(now=datetime(2026, 8, 19, 12, 0))
+radar = Ld2410Source(FakePort(radar_frame(ld2410.MOVING)))
+check("присутствие появилось", radar.tick(radar_state), True)
+check("состояние выставлено", radar_state.desk.presence, True)
+
+radar.port = FakePort(radar_frame(ld2410.STATIC))
+radar._next_at = 0
+check("статичное присутствие не считается уходом", radar.tick(radar_state), False)
+check("человек всё ещё за столом", radar_state.desk.presence, True)
+
+radar.port = FakePort(radar_frame(ld2410.NO_TARGET))
+radar._next_at = 0
+check("ушёл", radar.tick(radar_state), True)
+check("присутствия нет", radar_state.desk.presence, False)
+
+# Кадр, разрезанный между двумя чтениями, должен склеиться.
+whole = radar_frame(ld2410.MOVING)
+split = Ld2410Source(FakePort(whole[:7]))
+split_state = State(now=datetime(2026, 8, 19, 12, 0))
+check("половина кадра — ещё нечего разбирать", split.tick(split_state), False)
+split.port = FakePort(whole[7:])
+split._next_at = 0
+check("вторая половина склеилась", split.tick(split_state), True)
+
+configured = Ld2410Source(FakePort(b""), engineering=True)
+configured.configure()
+check("инженерный режим включается тремя командами",
+      configured.port.written.count(ld2410.CMD_HEAD), 3)
+
+print("\nИсточник тача")
+
+
+class FakePanel:
+    def __init__(self, positions: list) -> None:
+        self.positions = positions
+
+    def position(self):
+        return self.positions.pop(0) if self.positions else None
+
+
+touch_bus = EventBus()
+recognizer = GestureRecognizer(touch_bus, 480)
+touch_source = TouchSource(FakePanel([(400, 160), (300, 160), (120, 165), None]), recognizer)
+touch_state = State()
+for _ in range(4):
+    touch_source._next_at = 0
+    touch_source.tick(touch_state)
+event = touch_bus.poll()
+check("протяжка по панели стала свайпом", event.action if event else None, Action.NEXT)
+
+tap_bus = EventBus()
+tap_source = TouchSource(FakePanel([(240, 160), None]), GestureRecognizer(tap_bus, 480))
+for _ in range(2):
+    tap_source._next_at = 0
+    tap_source.tick(State())
+tap_event = tap_bus.poll()
+check("одиночное касание стало тапом", tap_event.action if tap_event else None, Action.TAP)
+check("координаты доехали", (tap_event.x, tap_event.y), (240, 160))
+
+print("\nНастройки поверх конфига")
+with tempfile.TemporaryDirectory() as tmp:
+    store = Path(tmp) / "settings.json"
+
+    check("без файла — только значения по умолчанию",
+          settings_mod.load(store), dict(settings_mod.DEFAULTS))
+
+    saved = settings_mod.save({"ambient.away_delay_minutes": 6, "air.co2_warn": 900}, store)
+    check("сохранённое читается", saved["ambient.away_delay_minutes"], 6)
+
+    # Браузер не должен уметь переписать номера ножек и скорости шин.
+    settings_mod.save({"display.dc": 99, "radar.baud": 1}, store)
+    reread = settings_mod.load(store)
+    check("посторонние ключи отброшены",
+          "display.dc" in reread or "radar.baud" in reread, False)
+
+    settings_mod.save({"ambient.away_delay_minutes": "не число"}, store)
+    check("значение неверного типа не затирает прежнее",
+          settings_mod.load(store)["ambient.away_delay_minutes"], 6)
+
+    settings_mod.save({"screens.enabled": ["clock.ClockScreen"]}, store)
+    base = {"screens": {"enabled": ["a", "b", "c"], "manual": "manual"},
+            "ambient": {"enabled": ["x"], "away_delay_minutes": 3},
+            "display": {"dc": 25}}
+    merged = settings_mod.apply(base, settings_mod.load(store))
+    check("список экранов заменён", merged["screens"]["enabled"], ["clock.ClockScreen"])
+    check("пауза покоя переопределена", merged["ambient"]["away_delay_minutes"], 6)
+    check("не тронутое осталось", merged["screens"]["manual"], "manual")
+    check("пины целы", merged["display"]["dc"], 25)
+    check("исходный конфиг не испорчен", base["screens"]["enabled"], ["a", "b", "c"])
+
+print("\nСнимок для дашборда")
+snap_state = State(now=datetime(2026, 8, 19, 12, 0))
+snap_state.desk.presence = True
+snap_state.env.co2 = 820
+snap_state.health.throttled = True
+
+
+class RadarStub:
+    name, ok, last_error, failures = "presence", True, None, 0
+
+    class last_report:
+        state_name, present, distance_cm = "статично", True, 140
+        moving_energy, static_energy = 12, 55
+        moving_gates = [1, 2, 3, 4, 5, 4, 3, 2, 1]
+        static_gates = [5, 6, 7, 8, 9, 8, 7, 6, 5]
+
+
+snap = status_mod.snapshot(snap_state, [RadarStub()])
+check("присутствие в снимке", snap["presence"], True)
+check("энергия по воротам доехала", len(snap["radar"]["moving_gates"]), 9)
+check("отказ питания попал в снимок", [p["label"] for p in snap["problems"]], ["питание"])
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "status.json"
+    # Свежесть считается от настоящего «сейчас», поэтому и метка времени
+    # должна быть настоящей: со снимком из прошлого проверялась бы не
+    # запись с чтением, а работа календаря.
+    fresh_state = State(now=datetime.now())
+    fresh_state.env.co2 = 820
+    status_mod.write(status_mod.snapshot(fresh_state), path)
+    loaded = status_mod.read(path)
+    check("снимок читается обратно", loaded["env"]["co2"], 820)
+    check("свежий снимок не считается устаревшим", loaded["stale"], False)
+    check("временных файлов не осталось", len(list(Path(tmp).iterdir())), 1)
+
+    stale = dict(snap, ts=datetime(2020, 1, 1).isoformat(timespec="seconds"))
+    status_mod.write(stale, path)
+    check("старый снимок помечен устаревшим", status_mod.read(path)["stale"], True)
+
+check("нет файла — нет снимка", status_mod.read(Path("нет-такого.json")), None)
+
+print("\nПоиск необычных сессий")
+from app import anomaly as anomaly_mod  # noqa: E402
+
+
+def make_window(hour: int = 12, minutes: int = 80, keys: float = 40.0,
+                clicks: float = 9.0, sitting: int = 55, breaks: int = 1):
+    return anomaly_mod.Window(
+        start=datetime(2026, 8, 19, hour), at_desk_minutes=minutes,
+        keys_per_minute=keys, clicks_per_minute=clicks,
+        longest_sitting=sitting, breaks=breaks, hour=hour, weekend=0)
+
+
+# Час кодируется точкой на окружности: иначе 23 и 0 оказались бы максимально
+# далеки, хотя это соседние часы.
+late, early = make_window(hour=23).vector(), make_window(hour=0).vector()
+noon = make_window(hour=12).vector()
+gap_neighbour = sum((a - b) ** 2 for a, b in zip(late[5:7], early[5:7])) ** 0.5
+gap_across = sum((a - b) ** 2 for a, b in zip(late[5:7], noon[5:7])) ** 0.5
+check("23 и 0 часов рядом, а не на разных концах", gap_neighbour < gap_across, True)
+
+typical = [make_window(hour=10 + i % 8) for i in range(80)]
+check("объяснение без эталона", anomaly_mod.explain(make_window(), []), "нет с чем сравнивать")
+check("обычное окно объясняется нейтрально",
+      anomaly_mod.explain(make_window(), typical), "непохоже на обычную сессию")
+check("марафон назван",
+      "без перерыва" in anomaly_mod.explain(make_window(sitting=120), typical), True)
+check("всплеск мыши назван",
+      "мыши" in anomaly_mod.explain(make_window(clicks=40), typical), True)
+check("ночь названа", "ночное время" in anomaly_mod.explain(make_window(hour=3), typical), True)
+check("причин не больше двух",
+      len(anomaly_mod.explain(make_window(hour=3, sitting=120, clicks=40), typical).split(", ")), 2)
+
+model = anomaly_mod.AnomalyModel()
+check("мало окон — не обучаемся", model.fit(typical[:10]), False)
+check("необученная модель молчит", model.score(make_window())[0], False)
+check("обучение на достаточной выборке", model.fit(typical), True)
+check("типичное окно не помечено", model.score(make_window())[0], False)
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "m.pkl"
+    model.save(path)
+    restored = anomaly_mod.AnomalyModel()
+    check("модель читается обратно", restored.load(path), True)
+    check("эталон сохранён", len(restored.reference), len(typical))
+    check("битый файл не роняет", anomaly_mod.AnomalyModel().load(Path(tmp) / "нет.pkl"), False)
+
+print(f"\n  провалов: {failed}")
+raise SystemExit(1 if failed else 0)

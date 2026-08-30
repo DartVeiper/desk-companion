@@ -1,0 +1,15 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# SQLite databases + WAL/SHM temp files
+# (schema lives in pi/app/schema.sql; data is generated/seedable)
+*.db
+*.db-shm
+*.db-wal
+
+# Live runtime preview output (regenerated on each run)
+pi/preview/backups/
+pi/preview/live/
+pi/preview/live.png
+pi/preview/status.json
