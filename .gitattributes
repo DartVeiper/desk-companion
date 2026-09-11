@@ -1,0 +1,33 @@
+# Переводы строк.
+#
+# Разработка идёт на Windows, где core.autocrlf=true по умолчанию, а
+# исполняется всё на Linux. Без этого файла git при каждой выдаче переписывал
+# бы скрипты в CRLF, и на Pi они падали бы с «\r: command not found» — ошибка
+# невнятная, а искать её будешь в самом скрипте, а не в переводах строк.
+#
+# То же касается юнитов systemd и конфигов: systemd на возврат каретки
+# ругается, а tomllib молча примет его частью строкового значения.
+
+*.sh      text eol=lf
+*.py      text eol=lf
+*.toml    text eol=lf
+*.sql     text eol=lf
+*.service text eol=lf
+*.timer   text eol=lf
+*.json    text eol=lf
+
+# Файлы, которые открывают только на Windows, оставляем как есть.
+*.cs      text eol=crlf
+*.csproj  text eol=crlf
+*.manifest text eol=crlf
+
+# Двоичное git трогать не должен вовсе.
+*.ttf  binary
+*.png  binary
+*.db   binary
+*.pkl  binary
+
+# Сам этот файл тоже.
+.gitattributes text eol=lf
+.gitignore    text eol=lf
+*.md          text eol=lf
