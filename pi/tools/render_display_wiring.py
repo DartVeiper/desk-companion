@@ -43,23 +43,28 @@ MODULE = [
     ("T_CS",      None, "шаг тача",        None,            False),
     ("T_CLK",     None, "шаг тача",        None,            False),
     ("SDO(MISO)", 21,   "GPIO9",           (166, 150, 240), False),
-    ("LED",       12,   "GPIO18 · ШИМ",    (232, 178, 70),  True),
+    ("LED",       12,   "GPIO18 · ШИМ",    (232, 178, 70),  False),
     ("SCK",       23,   "GPIO11",          (70, 150, 240),  False),
     ("SDI(MOSI)", 19,   "GPIO10",          (80, 195, 215),  False),
     ("DC/RS",     22,   "GPIO25",          (40, 175, 125),  False),
     ("RESET",     18,   "GPIO24",          (155, 205, 80),  False),
     ("CS",        24,   "GPIO8 · CE0",     (225, 130, 210), False),
-    ("GND",       6,    "общий",           (150, 158, 170), True),
-    ("VCC",       2,    "5 В",             (235, 100, 100), True),
+    ("GND",       6,    "общий",           (150, 158, 170), False),
+    ("VCC",       17,   "3,3 В",           (235, 100, 100), True),
 ]
 
-# Проверка питания. Ножки НЕ те же, что в основной схеме: VCC и LED уходят
-# на 3,3 В, потому что пять вольт могут оказаться смертельными для модуля,
-# а три вольта безопасны при любом ответе.
-TEST_WIRES = (
-    ("VCC", 17, "3,3 В — заведомо безопасно"),
-    ("GND", 6, "общий"),
-    ("LED", 1, "3,3 В — подсветка напрямую"),
+# Почему 3,3, а не 5. Какое напряжение нужно модулю, на глаз не определить:
+# при входных 3,3 В внутренний стабилизатор, если он там есть, отдаёт
+# 3,0-3,2 и подсветка тускнеет незаметно. Поэтому берём заведомо безопасные
+# три вольта, а достаточно ли их — спрашиваем у самого Pi.
+VCC_NOTE = (
+    "ПОЧЕМУ VCC НА 3,3 В, А НЕ НА 5",
+    (
+        "Три вольта безопасны при любом устройстве модуля, пять — только если",
+        "внутри есть стабилизатор, а это на глаз не проверить. Поэтому работаем",
+        "от 3,3 В и смотрим, тянет ли шина:  vcgencmd get_throttled",
+        "0x0 — всё в порядке, так и оставляем. Иначе VCC переезжает на pin 2.",
+    ),
 )
 
 NOTES = (
@@ -93,7 +98,7 @@ def main() -> None:
     top = PAD + 136   # запас под две строки подзаголовка и подписи над колонками
     mod_h, pi_h = len(MODULE) * MOD_ROW, 20 * PI_ROW
     body = max(mod_h, pi_h)
-    height = top + body + 290 + len(NOTES) * 25 + PAD
+    height = top + body + 230 + len(NOTES) * 25 + PAD
 
     canvas = Image.new("RGB", (width, height), BG)
     d = ImageDraw.Draw(canvas)
@@ -127,7 +132,7 @@ def main() -> None:
             if in_test:
                 d.rounded_rectangle((PAD + 146, y - 11, PAD + 196, y + 10),
                                     radius=10, fill=(70, 56, 20))
-                d.text((PAD + 171, y), "тест", font=f_small, fill=TEST, anchor="mm")
+                d.text((PAD + 171, y), "3,3 В", font=f_small, fill=TEST, anchor="mm")
             d.text((mod_right - 6, y - 8), f"pin {pin}", font=f_dest, fill=c, anchor="rm")
             d.text((mod_right - 6, y + 9), dest, font=f_small, fill=DIM, anchor="rm")
         else:
@@ -176,31 +181,16 @@ def main() -> None:
             d.line([(pi_x[pin] + 9, gap), (pi_x[pin] + 9, y1 - 9)], fill=color, width=3)
 
     # ── сначала проверка питания ───────────────────────────────────────────
+    title, lines = VCC_NOTE
     by = top + body + 40
-    bh = 50 + len(TEST_WIRES) * 30
+    bh = 46 + len(lines) * 22
     d.rounded_rectangle((PAD, by, PAD + 700, by + bh), radius=10,
                         fill=(38, 31, 14), outline=TEST, width=2)
-    d.text((PAD + 22, by + 16), "СНАЧАЛА — ПРОВЕРКА ПИТАНИЯ, ТРИ ПРОВОДА",
-           font=f_dest, fill=TEST)
-    for i, (name, pin, why) in enumerate(TEST_WIRES):
-        y = by + 48 + i * 30
-        d.text((PAD + 22, y), name, font=f_name, fill=INK)
-        d.text((PAD + 152, y + 3), f"pin {pin}", font=f_dest, fill=TEST)
-        d.text((PAD + 232, y + 3), why, font=f_small, fill=(190, 180, 155))
+    d.text((PAD + 22, by + 16), title, font=f_dest, fill=TEST)
+    for i, line in enumerate(lines):
+        d.text((PAD + 22, by + 44 + i * 22), line, font=f_small, fill=(215, 195, 150))
 
-    explain = (
-        "Здесь VCC и LED идут на 3,3 В, а НЕ на pin 2 и pin 12 из схемы выше: "
-        "пять вольт могут убить",
-        "трёхвольтовый модуль, а три вольта безопасны при любом ответе. "
-        "Подсветка зажглась ярко —",
-        "модуль на 3,3 В, VCC там и остаётся. Тусклая или мёртвая — "
-        "внутри стабилизатор, VCC на pin 2.",
-    )
-    ey = by + bh + 18
-    for i, line in enumerate(explain):
-        d.text((PAD, ey + i * 22), line, font=f_small, fill=(215, 195, 150))
-
-    ny = ey + len(explain) * 22 + 22
+    ny = by + bh + 28
     for i, (note, color) in enumerate(NOTES):
         if note:
             d.text((PAD, ny + i * 25), note, font=f_sub, fill=color)
