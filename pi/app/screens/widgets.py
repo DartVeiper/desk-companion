@@ -79,7 +79,10 @@ def hold_overlay(frame: Image.Image, held_ms: float) -> None:
     """
     from ..inputs.gestures import HOLD_MS, SETTINGS_MS
 
-    if held_ms < 120:  # случайное касание не должно мигать полосой
+    # Порог заметно выше времени осознанного клика: быстрое нажатие
+    # длится 80-200 мс, и панель, мелькнувшая на нём, только мешает —
+    # особенно когда через меню идут быстро и подряд.
+    if held_ms < 400:
         return
 
     # Шкала одна на весь жест, от нуля до трёх секунд, и назад не ходит.
@@ -131,6 +134,47 @@ def card(draw: ImageDraw.ImageDraw, box: Box, fill: Color | None = None) -> None
     draw.rounded_rectangle(box, radius=14, fill=fill or theme.SURFACE)
 
 
+def ellipsize(draw: ImageDraw.ImageDraw, text: str, max_width: float, font) -> str:
+    """Обрезать по ширине, поставив многоточие.
+
+    Уменьшать шрифт тут нельзя до бесконечности: подпись «сильный снегопад
+    с метелью» под карточкой ужалась бы до нечитаемой. Лучше честно
+    показать начало и дать понять, что дальше есть ещё.
+    """
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    cut = text
+    while cut and draw.textlength(cut + "…", font=font) > max_width:
+        cut = cut[:-1]
+    return (cut.rstrip() + "…") if cut else ""
+
+
+def wrap(draw: ImageDraw.ImageDraw, text: str, max_width: float, font,
+         max_lines: int = 2) -> list[str]:
+    """Разложить по словам в строки нужной ширины.
+
+    Последняя строка при нехватке места обрезается многоточием — иначе
+    длинное объяснение молча уезжает за край экрана.
+    """
+    words, lines, line = text.split(), [], ""
+    for word in words:
+        probe = f"{line} {word}".strip()
+        if draw.textlength(probe, font=font) <= max_width or not line:
+            line = probe
+        else:
+            lines.append(line)
+            line = word
+            if len(lines) == max_lines:
+                break
+    if line and len(lines) < max_lines:
+        lines.append(line)
+    if len(lines) == max_lines:
+        used = len(" ".join(lines).split())
+        if used < len(words):
+            lines[-1] = ellipsize(draw, lines[-1] + " " + words[used], max_width, font)
+    return lines
+
+
 def stat_card(
     draw: ImageDraw.ImageDraw,
     box: Box,
@@ -144,8 +188,10 @@ def stat_card(
     cx = (box[0] + box[2]) / 2
     draw.text((cx, box[1] + 38), value, font=theme.font(value_size, bold=True),
               fill=color, anchor="mm")
-    draw.text((cx, box[3] - 22), caption, font=theme.font(theme.TINY),
-              fill=theme.DIM, anchor="mm")
+    caption_font = theme.font(theme.TINY)
+    draw.text((cx, box[3] - 22),
+              ellipsize(draw, caption, box[2] - box[0] - 16, caption_font),
+              font=caption_font, fill=theme.DIM, anchor="mm")
 
 
 def fit_font(
@@ -195,8 +241,11 @@ def empty_state(draw: ImageDraw.ImageDraw, width: int, height: int, text: str, h
     draw.text((width / 2, height / 2 - 12), text,
               font=theme.font(theme.H2, bold=True), fill=theme.DIM, anchor="mm")
     if hint:
-        draw.text((width / 2, height / 2 + 26), hint,
-                  font=theme.font(theme.SMALL), fill=theme.LINE, anchor="mm")
+        font = theme.font(theme.SMALL)
+        lines = wrap(draw, hint, width - PAD * 2 - 20, font)
+        for i, line in enumerate(lines):
+            draw.text((width / 2, height / 2 + 26 + i * 20), line,
+                      font=font, fill=theme.LINE, anchor="mm")
 
 
 def duration(seconds: float) -> str:

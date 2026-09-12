@@ -50,6 +50,68 @@ def throttled() -> bool:
     return "=0x0" not in out
 
 
+def memory_mb() -> tuple[int, int]:
+    """Занято и всего, в мегабайтах. Из /proc/meminfo, без сторонних пакетов.
+
+    Занятым считаем то же, что показывает free: всего минус доступное.
+    Именно «доступное», а не «свободное» — кеш отдаётся под нужды программ
+    и свободной памятью по сути является.
+    """
+    raw = _read("/proc/meminfo")
+    if not raw:
+        return 0, 0
+    values = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].rstrip(":") in ("MemTotal", "MemAvailable"):
+            values[parts[0].rstrip(":")] = int(parts[1])
+    total = values.get("MemTotal", 0) // 1024
+    available = values.get("MemAvailable", 0) // 1024
+    return max(0, total - available), total
+
+
+def code_version() -> str:
+    """Версия доставленного кода: её кладёт deploy.sh рядом с приложением."""
+    return (_read(str(Path(__file__).resolve().parents[2] / ".version")) or "")[:32]
+
+
+def wifi_signal_dbm() -> int | None:
+    """Уровень сигнала из /proc/net/wireless.
+
+    Файлом, а не утилитой: iwgetid и iwconfig в свежей Raspberry Pi OS уже
+    не ставятся, и вызов молча ничего не возвращал бы.
+    """
+    raw = _read("/proc/net/wireless")
+    if not raw:
+        return None
+    for line in raw.splitlines()[2:]:
+        parts = line.split()
+        if len(parts) < 4 or not parts[0].startswith("wlan"):
+            continue
+        try:
+            return int(float(parts[3].rstrip(".")))
+        except ValueError:
+            return None
+    return None
+
+
+def wifi_ssid() -> str:
+    """Имя сети через nmcli: в /proc его нет, а NetworkManager знает.
+
+    Отсутствие nmcli не ошибка — на машине разработки его нет, и поле
+    просто останется пустым.
+    """
+    try:
+        out = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
+                             capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for line in out.splitlines():
+        if line.startswith("yes:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
 def local_ip() -> str:
     """Адрес в локальной сети. UDP-сокет никуда не шлёт — только выясняет
     у ядра, через какой интерфейс пошёл бы трафик."""
@@ -80,5 +142,12 @@ class SystemHealthSource(Source):
         health.throttled = throttled()
         health.disk_free_pct = usage.free / usage.total * 100
         health.ip = local_ip()
+        health.wifi_ssid = wifi_ssid()
+        health.wifi_signal_dbm = wifi_signal_dbm()
+        health.ram_used_mb, health.ram_total_mb = memory_mb()
+        if not health.version:
+            health.version = code_version()
+        # Адрес есть — значит сеть работает, как бы ни звалась. Имя и
+        # уровень нужны человеку, а не проверке.
         health.wifi_ok = bool(health.ip)
         return True

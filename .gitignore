@@ -13,3 +13,4 @@ pi/preview/backups/
 pi/preview/live/
 pi/preview/live.png
 pi/preview/status.json
+pi/.version

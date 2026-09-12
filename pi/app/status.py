@@ -58,6 +58,9 @@ def snapshot(state: State, sources: list | None = None) -> dict:
             "scd41_ok": health.scd41_ok, "ld2410_ok": health.ld2410_ok,
             "throttled": health.throttled, "disk_free_pct": round(health.disk_free_pct, 1),
             "cpu_temp": health.cpu_temp, "uptime_seconds": health.uptime_seconds,
+            "wifi_signal_dbm": health.wifi_signal_dbm,
+            "ram_used_mb": health.ram_used_mb, "ram_total_mb": health.ram_total_mb,
+            "version": health.version, "input_rejected": health.input_rejected,
         },
         "problems": [{"label": label, "detail": detail, "critical": critical}
                      for label, detail, critical in state.problems()],

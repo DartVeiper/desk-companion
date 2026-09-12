@@ -37,6 +37,14 @@ if ! ssh -o ConnectTimeout=8 -o BatchMode=no "$TARGET" true 2>/dev/null; then
     exit 1
 fi
 
+# Отпечаток доставляемого кода: его читает диагностика на самом блоке.
+# Без него после каждой доставки непонятно, доехала ли она — а понимать
+# это приходится часто, и гадание стоит дороже одной строки.
+git -C "$HERE" describe --always --dirty 2>/dev/null > "$HERE/pi/.version" || true
+date +" %d.%m %H:%M" >> "$HERE/pi/.version"
+tr -d "
+" < "$HERE/pi/.version" > "$HERE/pi/.version.tmp" && mv "$HERE/pi/.version.tmp" "$HERE/pi/.version"
+
 SIZE=$(tar czf - -C "$HERE" "${EXCLUDES[@]}" pi | wc -c)
 printf '    передаётся: %s КБ\n' "$((SIZE / 1024))"
 

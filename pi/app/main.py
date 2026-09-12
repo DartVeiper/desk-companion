@@ -125,6 +125,10 @@ class Application:
         #: Откуда брать «сколько держат прямо сейчас». Каждый элемент —
         #: функция, возвращающая миллисекунды. Пусто на машине разработки.
         self.hold_providers: list[Callable[[], float]] = []
+        #: Энкодер, если он поднялся. Нужен ради счётчика отброшенных
+        #: переходов: по нему видно, теряются ли щелчки, и это первое,
+        #: что хочется знать, когда крутилка «иногда не срабатывает».
+        self.encoder = None
         self._last_brightness: float | None = None
         self._last_screen: str | None = None
         self._last_status = 0.0
@@ -235,6 +239,8 @@ class Application:
     def _sensor_health(self) -> None:
         """Отказ источника — в строку состояния, а не в лог, который никто
         не читает."""
+        if self.encoder is not None:
+            self.state.health.input_rejected = self.encoder.rotary.rejected
         for source in self.sources:
             if source.name.startswith("env"):
                 self.state.health.scd41_ok = source.ok
@@ -256,7 +262,8 @@ class Application:
         self._running = False
 
     def attach(self, display: Display | None, sources: list[Source],
-               hold_providers: list[Callable[[], float]] | None = None) -> None:
+               hold_providers: list[Callable[[], float]] | None = None,
+               encoder=None) -> None:
         """Подключить железо после создания приложения.
 
         Порядок такой, потому что энкодеру и тачу нужна шина событий, а она
@@ -267,6 +274,8 @@ class Application:
             self.display = display
         self.sources += sources
         self.hold_providers += hold_providers or []
+        if encoder is not None:
+            self.encoder = encoder
 
     def close(self) -> None:
         for source in self.sources:
@@ -341,7 +350,7 @@ def main() -> None:
 
         kit = hardware.build(load_config(CONFIG), app.bus,
                              app.display.width, app.display.height)
-        app.attach(kit.display, kit.sources, kit.hold_providers)
+        app.attach(kit.display, kit.sources, kit.hold_providers, kit.encoder)
         for problem in kit.problems:
             # Не падаем: собирать блок вы будете по узлам, и на каждом шаге
             # должно быть видно, что уже работает, а что ещё нет.

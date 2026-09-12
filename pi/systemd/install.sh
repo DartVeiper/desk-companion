@@ -38,6 +38,12 @@ Wants=network-online.target
 Type=simple
 User=$TARGET_USER
 WorkingDirectory=$APP_DIR
+# Снимок состояния для дашборда сервис кладёт в /run/desk-companion, а сам
+# работает не от root и создать каталог в /run не может: попытка молча
+# отваливалась, и дашборд не видел живых данных. systemd создаёт каталог
+# сам и отдаёт его владельцу сервиса.
+RuntimeDirectory=desk-companion
+RuntimeDirectoryMode=0755
 # --real обязателен: без него сервис поднимет бэкенд разработки и будет
 # писать кадры в PNG, а экран останется тёмным. --mqtt слушает брокер,
 # который в этом же юните стоит в After. Координаты берутся из config.toml.

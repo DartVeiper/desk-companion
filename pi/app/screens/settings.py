@@ -78,18 +78,29 @@ class DiagnosticsScreen(DetailScreen):
             ("темп. Pi", "—" if h.cpu_temp is None else f"{h.cpu_temp:.0f}°",
              h.cpu_temp is None or h.cpu_temp < 75),
             ("аптайм", w.duration(h.uptime_seconds), True),
+            ("память", "—" if not h.ram_total_mb
+             else f"{h.ram_used_mb} из {h.ram_total_mb} МБ",
+             not h.ram_total_mb or h.ram_used_mb < h.ram_total_mb * 0.85),
+            ("версия", h.version or "—", bool(h.version)),
+            ("сбои ввода", str(h.input_rejected), h.input_rejected < 200),
             ("ПК-агент", "онлайн" if state.pc_online else "офлайн", state.pc_online),
         ]
 
+        # Строки раскидываем по всей высоте, а не жмём к верху: экран
+        # смотрят через стол, и свободное место внизу дороже компактности.
         cols, per_col = 2, (len(rows) + 1) // 2
         col_w = (width - theme.PAD * 2 - w.GAP) / cols
+        top, bottom = 66, height - theme.PAD - 6
+        step = (bottom - top) / max(1, per_col - 1)
         for i, (name, value, ok) in enumerate(rows):
             x = theme.PAD + (i // per_col) * (col_w + w.GAP)
-            y = 68 + (i % per_col) * 22
-            draw.ellipse((x, y - 3, x + 6, y + 3), fill=theme.OK if ok else theme.ALERT)
-            draw.text((x + 14, y), name, font=theme.font(theme.TINY), fill=theme.DIM, anchor="lm")
+            y = top + (i % per_col) * step
+            draw.ellipse((x, y - 4, x + 8, y + 4), fill=theme.OK if ok else theme.ALERT)
+            draw.text((x + 16, y), name, font=theme.font(theme.SMALL),
+                      fill=theme.DIM, anchor="lm")
             draw.text((x + col_w - 4, y), value,
-                      font=w.fit_font(draw, value, col_w - 84, theme.TINY, bold=True, min_size=10),
+                      font=w.fit_font(draw, value, col_w - 96, theme.SMALL,
+                                      bold=True, min_size=10),
                       fill=theme.FG if ok else theme.ALERT, anchor="rm")
 
 
