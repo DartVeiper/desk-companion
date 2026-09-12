@@ -114,7 +114,15 @@ class MqttSource(Source):
     def connect(self) -> None:
         import paho.mqtt.client as mqtt
 
-        client = mqtt.Client(client_id=self.client_id, clean_session=True)
+        # paho 2.0 потребовал явно выбирать версию API обратных вызовов:
+        # конструктор без неё просто падает. VERSION1 — это ровно те
+        # сигнатуры, что объявлены ниже, поэтому одной ветки хватает на обе
+        # системы: в Bookworm лежит paho 1.6, в Trixie уже 2.x.
+        if hasattr(mqtt, "CallbackAPIVersion"):
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1,
+                                 client_id=self.client_id, clean_session=True)
+        else:
+            client = mqtt.Client(client_id=self.client_id, clean_session=True)
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
