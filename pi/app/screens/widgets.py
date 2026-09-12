@@ -82,31 +82,49 @@ def hold_overlay(frame: Image.Image, held_ms: float) -> None:
     if held_ms < 120:  # случайное касание не должно мигать полосой
         return
 
+    # Шкала одна на весь жест, от нуля до трёх секунд, и назад не ходит.
+    # Раньше полоса считала до первого порога, заполнялась, сбрасывалась на
+    # четверть и считала заново до второго — два жеста накладывались на одну
+    # полосу, и это читалось как сбой, а не как две ступени.
+    # Ступень теперь показана засечкой на самой шкале.
     if held_ms < HOLD_MS:
-        target, label, color = HOLD_MS, "ручной статус", theme.DIM
+        label, color = "обычное нажатие", theme.DIM
+        hint = "держите дальше — ручной статус"
     elif held_ms < SETTINGS_MS:
-        target, label, color = SETTINGS_MS, "ручной статус", theme.WARN
+        label, color = "ручной статус", theme.WARN
+        hint = "держите дальше — настройки"
     else:
-        target, label, color = SETTINGS_MS, "настройки", theme.ACCENT
+        label, color = "настройки", theme.ACCENT
+        hint = "можно отпускать"
 
     width, height = frame.size
     frame.paste(Image.blend(frame.copy(), Image.new("RGB", frame.size, theme.BG), 0.72), (0, 0))
     draw = ImageDraw.Draw(frame)
 
     cy = height / 2
-    panel = (PAD + 40, cy - 46, width - PAD - 40, cy + 46)
+    panel = (PAD + 40, cy - 54, width - PAD - 40, cy + 62)
     draw.rounded_rectangle(panel, radius=16, fill=theme.SURFACE, outline=color, width=2)
-    draw.text((width / 2, cy - 22), "продолжайте держать",
+    draw.text((width / 2, cy - 34), "отпустить сейчас —",
               font=theme.font(theme.TINY), fill=theme.DIM, anchor="mm")
-    draw.text((width / 2, cy + 6), label, font=theme.font(theme.H2, bold=True),
+    draw.text((width / 2, cy - 8), label, font=theme.font(theme.H2, bold=True),
               fill=color, anchor="mm")
 
-    bar = (panel[0] + 28, cy + 30, panel[2] - 28, cy + 38)
+    bar = (panel[0] + 28, cy + 20, panel[2] - 28, cy + 28)
+    span = bar[2] - bar[0]
     draw.rounded_rectangle(bar, radius=4, fill=theme.LINE)
-    filled = min(1.0, held_ms / target)
+
+    filled = min(1.0, held_ms / SETTINGS_MS)
     if filled > 0.02:
-        draw.rounded_rectangle((bar[0], bar[1], bar[0] + (bar[2] - bar[0]) * filled, bar[3]),
+        draw.rounded_rectangle((bar[0], bar[1], bar[0] + span * filled, bar[3]),
                                radius=4, fill=color)
+
+    # Засечка на первом пороге: видно, что ступени две и где вторая.
+    mark = bar[0] + span * (HOLD_MS / SETTINGS_MS)
+    draw.line((mark, bar[1] - 4, mark, bar[3] + 4),
+              fill=theme.FG if held_ms >= HOLD_MS else theme.DIM, width=2)
+
+    draw.text((width / 2, cy + 46), hint,
+              font=theme.font(theme.TINY), fill=theme.DIM, anchor="mm")
 
 
 def card(draw: ImageDraw.ImageDraw, box: Box, fill: Color | None = None) -> None:
