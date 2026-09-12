@@ -238,12 +238,29 @@ class Application:
         self.display.close()
 
 
+def location(args) -> tuple[float | None, float | None]:
+    """Координаты для погоды: аргументы важнее конфига.
+
+    Конфиг нужен сервису автозапуска: зашивать координаты в юнит systemd
+    значит держать их в двух местах и однажды поправить не то.
+    """
+    if args.lat is not None and args.lon is not None:
+        return args.lat, args.lon
+    try:
+        from app.screens.registry import load_config
+        block = load_config(CONFIG).get("location", {})
+        return block.get("lat"), block.get("lon")
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
 def build_sources(args, storage: Database | None) -> list[Source]:
     from app import sources as src
 
     out: list[Source] = [src.SystemHealthSource(), src.ManualResetSource()]
-    if args.lat is not None and args.lon is not None:
-        out.append(src.WeatherSource(args.lat, args.lon))
+    lat, lon = location(args)
+    if lat is not None and lon is not None:
+        out.append(src.WeatherSource(lat, lon))
     if storage is not None:
         out.append(src.StreakSource(storage))
         out.append(src.AnomalySource(storage))

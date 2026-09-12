@@ -38,7 +38,10 @@ Wants=network-online.target
 Type=simple
 User=$TARGET_USER
 WorkingDirectory=$APP_DIR
-ExecStart=$PYTHON -m app.main --db $DB
+# --real обязателен: без него сервис поднимет бэкенд разработки и будет
+# писать кадры в PNG, а экран останется тёмным. --mqtt слушает брокер,
+# который в этом же юните стоит в After. Координаты берутся из config.toml.
+ExecStart=$PYTHON -m app.main --real --mqtt localhost --db $DB
 Restart=always
 RestartSec=5
 # Вывод в журнал, а не в файл: журнал уже ограничен 32 МБ на шаге 1, и
@@ -67,6 +70,11 @@ WorkingDirectory=$APP_DIR
 ExecStart=$PYTHON dashboard_server.py --db $DB
 Restart=always
 RestartSec=5
+# Дашборд слушает 843, а порты ниже 1024 в Linux занимает только root.
+# Сервис работает не от root — поэтому выдаём одну эту возможность вместо
+# того, чтобы поднимать до root целиком. На Windows такого ограничения нет,
+# и при разработке это не проявлялось.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
