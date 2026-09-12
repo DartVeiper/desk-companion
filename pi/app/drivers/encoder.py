@@ -104,6 +104,17 @@ class Encoder:
         self.bus = bus
         self.rotary = QuadratureDecoder()
         self.button = ButtonDecoder()
+        # Объекты gpiozero живут здесь, а не в локальных переменных attach.
+        # Иначе после выхода из attach на них не остаётся ссылок, сборщик
+        # мусора их уничтожает, gpiozero освобождает ножки — и обработчики
+        # молча перестают вызываться. Уровни при этом читаются нормально,
+        # так что снаружи это выглядит как исправное железо без событий.
+        self.pins: tuple = ()
+
+    def close(self) -> None:
+        for pin in self.pins:
+            pin.close()
+        self.pins = ()
 
     def on_rotate(self, clk: int, dt: int) -> None:
         step = self.rotary.update(clk, dt)
@@ -145,4 +156,7 @@ def attach(bus: EventBus, clk: int = 17, dt: int = 27, sw: int = 22) -> Encoder:
     dt_pin.when_deactivated = rotated
     sw_pin.when_pressed = lambda: encoder.on_press(time.monotonic() * 1000)
     sw_pin.when_released = lambda: encoder.on_release(time.monotonic() * 1000)
+
+    # Ровно то, ради чего заведено поле: пережить выход из этой функции.
+    encoder.pins = (clk_pin, dt_pin, sw_pin)
     return encoder

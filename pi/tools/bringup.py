@@ -191,7 +191,9 @@ def step_encoder(cfg: dict) -> None:
         from app.inputs.events import EventBus
 
         bus = EventBus()
-        open_encoder(cfg["encoder"], bus)
+        # Держим ссылку: без неё gpiozero освободит ножки сразу после
+        # возврата, и шаг покажет тишину на исправном железе.
+        encoder = open_encoder(cfg["encoder"], bus)
     except Exception as exc:  # noqa: BLE001
         report(False, "инициализация", f"{type(exc).__name__}: {exc}",
                hint="CLK GPIO17 (pin 11), DT GPIO27 (pin 13), SW GPIO22 (pin 15)")

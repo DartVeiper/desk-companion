@@ -27,12 +27,18 @@ class Hardware:
     display: Display | None = None
     sources: list[Source] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    # Энкодер не источник и не дисплей: он ничего не отдаёт по запросу, а
+    # сам шлёт события в шину. Но храним его именно тут, потому что живым
+    # его делает только ссылка — без неё gpiozero освободит ножки.
+    encoder: object | None = None
 
     def close(self) -> None:
         for source in self.sources:
             source.close()
         if self.display is not None:
             self.display.close()
+        if self.encoder is not None:
+            self.encoder.close()
 
 
 def open_display(cfg: dict):
@@ -50,6 +56,11 @@ def open_display(cfg: dict):
     reset = DigitalOutputDevice(cfg["reset"])
     led = PWMOutputDevice(cfg["backlight"])
     led.value = 1.0
+
+    # Живыми эти три объекта остаются только за счёт лямбд ниже: они их
+    # захватывают, а сами лежат в возвращаемом дисплее. Заменить лямбды на
+    # прямые ссылки вроде set_dc=dc.on значит потерять reset и led —
+    # gpiozero освободит ножки, и экран погаснет без единой ошибки.
 
     display = St7796sDisplay(
         # writebytes2 сам режет большие блоки и не требует list(), в отличие
@@ -122,9 +133,13 @@ def open_air(cfg: dict):
 
 
 def open_encoder(cfg: dict, bus: EventBus):
+    """Вернуть энкодер обязательно: вызывающий держит его живым.
+
+    Выбросить возвращённое здесь значит потерять ножки — см. Encoder.pins.
+    """
     from .drivers.encoder import attach
 
-    attach(bus, clk=cfg["clk"], dt=cfg["dt"], sw=cfg["sw"])
+    return attach(bus, clk=cfg["clk"], dt=cfg["dt"], sw=cfg["sw"])
 
 
 def build(config: dict, bus: EventBus, width: int, height: int,
@@ -137,7 +152,8 @@ def build(config: dict, bus: EventBus, width: int, height: int,
     hardware = Hardware()
     steps = (
         ("display", lambda: setattr(hardware, "display", open_display(config["display"]))),
-        ("encoder", lambda: open_encoder(config["encoder"], bus)),
+        ("encoder", lambda: setattr(hardware, "encoder",
+                                   open_encoder(config["encoder"], bus))),
         ("touch", lambda: hardware.sources.append(open_touch(config["touch"], bus, width, height))),
         ("radar", lambda: hardware.sources.append(open_radar(config["radar"]))),
         ("air", lambda: hardware.sources.append(open_air(config["air"]))),
