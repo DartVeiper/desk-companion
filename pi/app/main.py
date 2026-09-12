@@ -34,6 +34,7 @@ from app.display.base import Display  # noqa: E402
 from app.display.preview import PreviewDisplay  # noqa: E402
 from app.inputs.events import EventBus  # noqa: E402
 from app.screens import registry as registry_mod  # noqa: E402
+from app.screens import widgets  # noqa: E402
 from app.sources.base import Source  # noqa: E402
 from app import settings as settings_mod  # noqa: E402
 from app import status as status_mod  # noqa: E402
@@ -121,6 +122,10 @@ class Application:
         self._running = False
         self._last_frame = 0.0
         self._last_minute: int | None = None
+        #: Откуда брать «сколько держат прямо сейчас». Каждый элемент —
+        #: функция, возвращающая миллисекунды. Пусто на машине разработки.
+        self.hold_providers: list[Callable[[], float]] = []
+        self._last_brightness: float | None = None
         self._last_screen: str | None = None
         self._last_status = 0.0
         self.frames = 0
@@ -130,7 +135,6 @@ class Application:
         config = settings_mod.apply(registry_mod.load_config(self.config_path))
         registry = registry_mod.ScreenRegistry(
             [registry_mod.instantiate(e) for e in config["screens"]["enabled"]],
-            config["screens"].get("manual"),
         )
         self.director = director_mod.from_config(config, registry)
 
@@ -160,6 +164,15 @@ class Application:
 
         while (event := self.bus.poll()) is not None:
             self.director.handle(event, self.state)
+            dirty = True
+
+        # Полоса прогресса удержания. Значение живёт в драйверах ввода, а
+        # рисует его отрисовка — связать их больше негде. Кадр при этом
+        # должен обновляться, пока палец на кнопке, иначе полоса замрёт.
+        held = max((provider() for provider in self.hold_providers), default=0.0)
+        held_now = held if held > 0 else None
+        if held_now != self.director.held_ms:
+            self.director.held_ms = held_now
             dirty = True
 
         self.recorder.tick(self.state)
@@ -194,7 +207,28 @@ class Application:
     def _render(self, screen) -> None:
         frame = Image.new("RGB", (self.display.width, self.display.height), theme.BG)
         screen.render(self.state, ImageDraw.Draw(frame), frame)
+        # Полоса прогресса удержания поверх любого экрана. Без неё три
+        # секунды до настроек приходится отсчитывать вслепую, и промах
+        # выглядит как «работает через раз».
+        if self.director.held_ms:
+            widgets.hold_overlay(frame, self.director.held_ms)
+        self._apply_brightness()
         self.display.show(frame)
+
+    def _apply_brightness(self) -> None:
+        """Довести яркость из настроек до подсветки.
+
+        Экран настроек менял только число в состоянии — до ШИМ оно не
+        доходило, и ползунок не делал ничего.
+        """
+        level = max(0.0, min(1.0, self.state.brightness / 100))
+        if level == self._last_brightness:
+            return
+        try:
+            self.display.backlight(level)
+        except (AttributeError, NotImplementedError):
+            return  # бэкенд разработки подсветки не имеет
+        self._last_brightness = level
         self._last_frame = time.monotonic()
         self.frames += 1
 
@@ -221,7 +255,8 @@ class Application:
     def stop(self, *_args) -> None:
         self._running = False
 
-    def attach(self, display: Display | None, sources: list[Source]) -> None:
+    def attach(self, display: Display | None, sources: list[Source],
+               hold_providers: list[Callable[[], float]] | None = None) -> None:
         """Подключить железо после создания приложения.
 
         Порядок такой, потому что энкодеру и тачу нужна шина событий, а она
@@ -231,6 +266,7 @@ class Application:
         if display is not None:
             self.display = display
         self.sources += sources
+        self.hold_providers += hold_providers or []
 
     def close(self) -> None:
         for source in self.sources:
@@ -305,7 +341,7 @@ def main() -> None:
 
         kit = hardware.build(load_config(CONFIG), app.bus,
                              app.display.width, app.display.height)
-        app.attach(kit.display, kit.sources)
+        app.attach(kit.display, kit.sources, kit.hold_providers)
         for problem in kit.problems:
             # Не падаем: собирать блок вы будете по узлам, и на каждом шаге
             # должно быть видно, что уже работает, а что ещё нет.

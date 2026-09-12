@@ -25,12 +25,11 @@ def instantiate(entry: str) -> Screen:
 
 
 class ScreenRegistry:
-    def __init__(self, screens: list[Screen], manual: str | None = None) -> None:
+    def __init__(self, screens: list[Screen]) -> None:
         if not screens:
             raise ValueError("реестр пуст: в конфиге не включён ни один экран")
         self._screens = screens
         self._index = 0
-        self.manual = manual
 
     @property
     def current(self) -> Screen:
@@ -68,4 +67,4 @@ def load_config(path: Path | str) -> dict:
 
 def load(config_path: Path | str) -> ScreenRegistry:
     cfg = load_config(config_path)["screens"]
-    return ScreenRegistry([instantiate(e) for e in cfg["enabled"]], cfg.get("manual"))
+    return ScreenRegistry([instantiate(e) for e in cfg["enabled"]])

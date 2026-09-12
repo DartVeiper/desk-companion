@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .display.base import Display
@@ -31,6 +33,9 @@ class Hardware:
     # сам шлёт события в шину. Но храним его именно тут, потому что живым
     # его делает только ссылка — без неё gpiozero освободит ножки.
     encoder: object | None = None
+    #: Функции «сколько миллисекунд держат прямо сейчас». Их читает
+    #: главный цикл, чтобы нарисовать полосу прогресса удержания.
+    hold_providers: list[Callable[[], float]] = field(default_factory=list)
 
     def close(self) -> None:
         for source in self.sources:
@@ -142,6 +147,20 @@ def open_encoder(cfg: dict, bus: EventBus):
     return attach(bus, clk=cfg["clk"], dt=cfg["dt"], sw=cfg["sw"])
 
 
+def _add_encoder(hardware: "Hardware", config: dict, bus: EventBus) -> None:
+    encoder = open_encoder(config["encoder"], bus)
+    hardware.encoder = encoder
+    hardware.hold_providers.append(
+        lambda: encoder.button.held_ms(time.monotonic() * 1000))
+
+
+def _add_touch(hardware: "Hardware", config: dict, bus: EventBus,
+               width: int, height: int) -> None:
+    source = open_touch(config["touch"], bus, width, height)
+    hardware.sources.append(source)
+    hardware.hold_providers.append(source.recognizer.held_ms)
+
+
 def build(config: dict, bus: EventBus, width: int, height: int,
           want: set[str] | None = None) -> Hardware:
     """Поднять всё, что получится. Отказ одного узла не мешает остальным.
@@ -152,9 +171,8 @@ def build(config: dict, bus: EventBus, width: int, height: int,
     hardware = Hardware()
     steps = (
         ("display", lambda: setattr(hardware, "display", open_display(config["display"]))),
-        ("encoder", lambda: setattr(hardware, "encoder",
-                                   open_encoder(config["encoder"], bus))),
-        ("touch", lambda: hardware.sources.append(open_touch(config["touch"], bus, width, height))),
+        ("encoder", lambda: _add_encoder(hardware, config, bus)),
+        ("touch", lambda: _add_touch(hardware, config, bus, width, height)),
         ("radar", lambda: hardware.sources.append(open_radar(config["radar"]))),
         ("air", lambda: hardware.sources.append(open_air(config["air"]))),
     )

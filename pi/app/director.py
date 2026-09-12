@@ -29,6 +29,7 @@ class Director:
         registry: ScreenRegistry,
         ambient: list[Screen],
         settings: Screen | None = None,
+        manual: Screen | None = None,
         away_delay: timedelta = timedelta(minutes=3),
         night_style: str | None = None,
         night_from: int = 23,
@@ -37,6 +38,10 @@ class Director:
         self.registry = registry
         self.ambient = ambient
         self.settings = settings
+        # Накладка, а не режим карусели. В карусели он был ловушкой:
+        # экран забирает себе вращение под выбор статуса, и, докрутив до
+        # него, выйти обратно вращением уже нельзя.
+        self.manual = manual
         self.away_delay = away_delay
         self.night_style = night_style
         self.night_from = night_from
@@ -142,14 +147,12 @@ class Director:
             self._apply_requests(screen)
             return
 
-        if action is Action.SELECT and screen.details:
-            self._stack.append(screen.details[0])
-        elif action is Action.NEXT:
+        if action is Action.NEXT:
             self.registry.next()
         elif action is Action.PREV:
             self.registry.prev()
-        elif action is Action.HOLD and self.registry.manual:
-            self.registry.go_to(self.registry.manual)
+        elif action is Action.HOLD and self.manual is not None:
+            self._stack.append(self.manual)
 
     def open_settings(self) -> None:
         if self.settings is None:
@@ -185,11 +188,17 @@ class Director:
             self._apply_requests(top)
             return
 
-        siblings = self._parent_of_top().details
-        if action in (Action.NEXT, Action.PREV) and len(siblings) > 1 and top in siblings:
-            i = siblings.index(top)
-            step = 1 if action is Action.NEXT else -1
-            self._stack[-1] = siblings[(i + step) % len(siblings)]
+        if action in (Action.NEXT, Action.PREV):
+            # Вращение, которое экран не забрал себе, не делает ничего.
+            # Раньше оно перекидывало на соседнюю накладку: покрутив в
+            # диагностике, человек оказывался в яркости, куда не собирался.
+            # Переключать соседей вращением — право экрана, а не умолчание.
+            if getattr(top, "cycle_siblings", False):
+                siblings = self._parent_of_top().details
+                if len(siblings) > 1 and top in siblings:
+                    i = siblings.index(top)
+                    step = 1 if action is Action.NEXT else -1
+                    self._stack[-1] = siblings[(i + step) % len(siblings)]
             return
 
         # Всё остальное поднимает на слой выше. Залипнуть нельзя.
@@ -233,11 +242,14 @@ def from_config(config: dict, registry: ScreenRegistry) -> Director:
     второй раз означало бы потерять их.
     """
     cfg = config.get("ambient", {})
-    settings_entry = config.get("screens", {}).get("settings")
+    screens = config.get("screens", {})
+    settings_entry = screens.get("settings")
+    manual_entry = screens.get("manual")
     return Director(
         registry,
         [instantiate(e) for e in cfg.get("enabled", [])],
         settings=instantiate(settings_entry) if settings_entry else None,
+        manual=instantiate(manual_entry) if manual_entry else None,
         away_delay=timedelta(minutes=cfg.get("away_delay_minutes", 3)),
         night_style=cfg.get("night_style"),
         night_from=cfg.get("night_from", 23),

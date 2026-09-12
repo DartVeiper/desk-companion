@@ -60,6 +60,10 @@ class ClockScreen(Screen):
     def __init__(self) -> None:
         from .details import AirDetail, WeatherDetail
 
+        # Нужны для тапа по карточке: погода и воздух открываются
+        # пальцем прямо отсюда. Те же экраны стоят и в карусели —
+        # это разные пути к одному месту, и оба уместны: пальцем
+        # тыкают в то, что видят, а крутилкой листают подряд.
         self.details = [WeatherDetail(), AirDetail()]
 
     @staticmethod

@@ -32,13 +32,13 @@ def check(name: str, got, expected) -> None:
 
 
 def make(hour: int = 14) -> tuple[Director, State]:
-    # Ручной статус кладём последним, чтобы индексы первых двух экранов
-    # не поехали в проверках навигации выше.
-    registry = ScreenRegistry([ClockScreen(), StreakScreen(), ManualScreen()], manual="manual")
+    # Ручного статуса в карусели нет намеренно: он накладка, как настройки.
+    registry = ScreenRegistry([ClockScreen(), StreakScreen()])
     director = Director(
         registry,
         [BigDigitsAmbient(), MatrixAmbient(), NightRedAmbient()],
         settings=SettingsScreen(),
+        manual=ManualScreen(),
         away_delay=AWAY, night_style="ambient_night", night_from=23, night_to=7,
     )
     state = State(now=datetime(2026, 8, 19, hour, 0))
@@ -66,7 +66,7 @@ check("старт — карусель", d.current(s).name, "clock")
 tap(d, s, 95, 250)
 check("тап по карточке погоды", d.current(s).name, "weather_detail")
 press(d, s, Action.NEXT)
-check("поворот листает подробности", d.current(s).name, "air_detail")
+check("поворот в подробностях никуда не уводит", d.current(s).name, "weather_detail")
 press(d, s, Action.SELECT)
 check("нажатие закрывает", d.current(s).name, "clock")
 tap(d, s, 400, 250)
@@ -74,7 +74,7 @@ check("тап по карточке комнаты", d.current(s).name, "air_det
 tap(d, s, 240, 160)
 check("тап закрывает", d.current(s).name, "clock")
 press(d, s, Action.SELECT)
-check("нажатие открывает первые подробности", d.current(s).name, "weather_detail")
+check("нажатие на часах ничего не открывает", d.current(s).name, "clock")
 
 print("\nТап мимо карточек — навигация по третям")
 d, s = make()
@@ -155,13 +155,29 @@ press(d, s, Action.SETTINGS)
 d.close_overlays()
 check("настройки закрываются снаружи", d.in_overlay, False)
 
+print("\nРучной статус недостижим вращением — иначе из него не выйти")
+d, s = make()
+seen = set()
+for _ in range(12):
+    press(d, s, Action.NEXT)
+    seen.add(d.current(s).name)
+check("карусель ручной статус не содержит", "manual" in seen, False)
+check("в карусели только включённые режимы", sorted(seen), ["clock", "streak"])
+d, s = make()
+press(d, s, Action.HOLD)
+press(d, s, Action.PREV)
+check("вращение в накладке её не закрывает", d.in_overlay, True)
+
 print("\nАвтосброс ручного статуса — шаг 8 плана")
 d, s = make()
 reset = ManualResetSource()
 press(d, s, Action.HOLD)
-check("удержание 0,7 с уводит в ручной статус", d.registry.current.name, "manual")
+check("удержание 0,7 с открывает ручной статус", d.current(s).name, "manual")
+check("и это накладка, а не режим карусели", d.in_overlay, True)
 press(d, s, Action.NEXT)
+check("вращение внутри перебирает статусы", d.current(s).name, "manual")
 press(d, s, Action.SELECT)
+check("выбор статуса закрывает накладку", d.in_overlay, False)
 check("статус выставлен", s.desk.manual_status is not None, True)
 check("срок сброса назначен", s.desk.manual_until is not None, True)
 s.now = s.now + timedelta(hours=4)
