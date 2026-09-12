@@ -118,14 +118,28 @@ listener 1883 0.0.0.0
 # Перед шагом 6 (ПК-агент) закрыть: mosquitto_passwd + allow_anonymous false.
 allow_anonymous true
 
-# persistence нужен, чтобы retain-сообщения (п.5 плана) пережили перезагрузку
-persistence true
-persistence_location /var/lib/mosquitto/
-autosave_interval 300
-
 max_queued_messages 200
 EOF
+
+# persistence нужен, чтобы retain-сообщения (п.5 плана) пережили перезагрузку.
+# Пакет Debian включает его в основном конфиге сам, а mosquitto 2.x считает
+# повторное объявление директивы не уточнением, а фатальной ошибкой: брокер
+# не стартует вовсе. Поэтому дописываем только то, чего там нет.
+if ! grep -qE '^[[:space:]]*persistence_location' /etc/mosquitto/mosquitto.conf 2>/dev/null; then
+    printf 'persistence true\npersistence_location /var/lib/mosquitto/\n' \
+        >> /etc/mosquitto/conf.d/desk-companion.conf
+    ok "persistence включён нами"
+else
+    ok "persistence уже включён пакетом, не дублируем"
+fi
+if ! grep -qE '^[[:space:]]*autosave_interval' /etc/mosquitto/mosquitto.conf 2>/dev/null; then
+    printf 'autosave_interval 300\n' >> /etc/mosquitto/conf.d/desk-companion.conf
+fi
+
 systemctl enable mosquitto >/dev/null 2>&1 || true
+# Без этого «Start request repeated too quickly» после неудачных попыток
+# переживает даже исправленный конфиг: systemd держит счётчик рестартов.
+systemctl reset-failed mosquitto >/dev/null 2>&1 || true
 systemctl restart mosquitto
 ok "mosquitto слушает 1883 на всех интерфейсах, автозапуск включён"
 
