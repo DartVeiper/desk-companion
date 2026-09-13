@@ -311,6 +311,10 @@ def main() -> None:
         print(f"доступно: {', '.join(STEPS)}")
         raise SystemExit(2)
 
+    if set(wanted) - {"kernel", "i2c", "touch"}:
+        import _service
+        _service.require_stopped()
+
     cfg = load_config(CONFIG)
     print("\n\033[1mDesk Companion — проверка железа\033[0m")
     print(f"  шаги: {', '.join(wanted)}")

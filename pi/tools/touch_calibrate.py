@@ -62,6 +62,9 @@ def main() -> None:
         print("\n  нужен spidev — запускать на самом Pi\n")
         raise SystemExit(1)
 
+    import _service
+    _service.require_stopped()
+
     from app.display.st7796s import open_spi
 
     display = open_spi()
