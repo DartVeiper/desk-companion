@@ -32,11 +32,19 @@ def to_rgb565(image: Image.Image) -> np.ndarray:
     Именно тут Python был бы безнадёжен: попиксельный перегон 153 600 точек
     на Pi Zero занял бы секунды. numpy делает это одной векторной операцией.
     """
-    arr = np.asarray(image.convert("RGB"), dtype=np.uint8)
-    red = arr[:, :, 0].astype(np.uint16) >> 3
-    green = arr[:, :, 1].astype(np.uint16) >> 2
-    blue = arr[:, :, 2].astype(np.uint16) >> 3
-    return (red << 11) | (green << 5) | blue
+    # convert("RGB") на кадре, который и так RGB, делает лишнюю копию на
+    # 460 КБ — на Zero это заметная доля бюджета кадра.
+    source = image if image.mode == "RGB" else image.convert("RGB")
+    arr = np.asarray(source, dtype=np.uint8)
+    # Собираем на месте, а не выражением из трёх слагаемых: у выражения
+    # каждый сдвиг и каждое «или» заводят свой временный массив на 600 КБ,
+    # и половина времени уходила на их выделение, а не на арифметику.
+    out = (arr[:, :, 0] >> 3).astype(np.uint16)
+    out <<= 6
+    out |= arr[:, :, 1] >> 2
+    out <<= 5
+    out |= arr[:, :, 2] >> 3
+    return out
 
 
 def band_bounds(height: int, bands: int = BANDS) -> list[tuple[int, int]]:
@@ -92,11 +100,13 @@ def changed_tiles(
 
     out: list[tuple[int, int, int, int]] = []
     col_bounds = band_bounds(width, cols)
-    for top, bottom in band_bounds(height, rows):
+    row_bounds = band_bounds(height, rows)
+    grid = _difference_grid(current, previous, row_bounds, col_bounds)
+
+    for row, (top, bottom) in enumerate(row_bounds):
         spans: list[tuple[int, int]] = []
-        for left, right in col_bounds:
-            if np.array_equal(current[top:bottom, left:right],
-                              previous[top:bottom, left:right]):
+        for col, (left, right) in enumerate(col_bounds):
+            if not grid[row][col]:
                 continue
             if spans and spans[-1][1] == left:
                 spans[-1] = (spans[-1][0], right)
@@ -109,6 +119,37 @@ def changed_tiles(
             else:
                 out.append((left, top, right, bottom))
     return out
+
+
+def _difference_grid(current: np.ndarray, previous: np.ndarray,
+                     row_bounds: list[tuple[int, int]],
+                     col_bounds: list[tuple[int, int]]) -> list[list[bool]]:
+    """Какие плитки сетки изменились: таблица 8x16 из «да/нет».
+
+    Раньше здесь стояло сто двадцать восемь отдельных сравнений numpy, по
+    одному на плитку. Каждое само по себе быстрое, но у вызова есть
+    постоянная плата, и на сто двадцать восемь вызовов набегало десять
+    миллисекунд на каждый кадр — больше, чем стоила вся отрисовка.
+
+    Быстрый путь сравнивает кадр целиком одной операцией, а потом сводит
+    результат к сетке: reshape режет массив на плитки без копирования,
+    any по двум осям схлопывает каждую в один признак. Работает, только
+    когда кадр делится на сетку нацело, поэтому рядом остаётся и честный
+    медленный путь — он же и проверяет быстрый в тестах.
+    """
+    height, width = current.shape
+    tile_h = row_bounds[0][1] - row_bounds[0][0]
+    tile_w = col_bounds[0][1] - col_bounds[0][0]
+
+    if height % tile_h or width % tile_w:
+        return [[not np.array_equal(current[top:bottom, left:right],
+                                    previous[top:bottom, left:right])
+                 for left, right in col_bounds]
+                for top, bottom in row_bounds]
+
+    diff = current != previous
+    tiles = diff.reshape(height // tile_h, tile_h, width // tile_w, tile_w)
+    return tiles.any(axis=(1, 3)).tolist()
 
 
 class BandedDisplay(Display):

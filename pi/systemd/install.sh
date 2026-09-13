@@ -53,6 +53,10 @@ RuntimeDirectoryMode=0755
 # писать кадры в PNG, а экран останется тёмным. --mqtt слушает брокер,
 # который в этом же юните стоит в After. Координаты берутся из config.toml.
 ExecStart=$PYTHON -m app.main --real --mqtt localhost --db $DB
+# Без этого вывод сервиса не виден вовсе: Python буферизует stdout, когда
+# он не терминал, и строки «не поднялось — ...» оседают в буфере на часы.
+# Диагностика, которой не видно, хуже её отсутствия — на неё рассчитываешь.
+Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=5
 # Вывод в журнал, а не в файл: журнал уже ограничен 32 МБ на шаге 1, и
@@ -79,6 +83,10 @@ Type=simple
 User=$TARGET_USER
 WorkingDirectory=$APP_DIR
 ExecStart=$PYTHON dashboard_server.py --db $DB
+# Без этого вывод сервиса не виден вовсе: Python буферизует stdout, когда
+# он не терминал, и строки «не поднялось — ...» оседают в буфере на часы.
+# Диагностика, которой не видно, хуже её отсутствия — на неё рассчитываешь.
+Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=5
 # Дашборд слушает 843, а порты ниже 1024 в Linux занимает только root.

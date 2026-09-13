@@ -23,7 +23,12 @@ class Scd41Source(Source):
     """
 
     name = "env"
-    interval = float(scd41.MEASUREMENT_PERIOD_S)
+    #: Датчик обновляет показания раз в пять секунд, но фазу его цикла мы
+    #: не знаем. Спрашивать ровно раз в пять секунд значит в худшем случае
+    #: разминуться и показать значение на десять секунд позже, чем можно.
+    #: Спрашивать «готово?» раз в секунду стоит одной короткой посылки по
+    #: I2C и убирает лишние пять секунд задержки.
+    interval = 1.0
 
     def __init__(self, sensor: scd41.Scd41, disable_asc: bool = True,
                  temperature_offset: float | None = None) -> None:
@@ -91,7 +96,11 @@ class Ld2410Source(Source):
     """
 
     name = "presence"
-    interval = 0.2
+    #: Модуль шлёт кадры десять раз в секунду. Опрашиваем вдвое чаще:
+    #: при совпадении периодов опрос и кадр расходятся по фазе, и половину
+    #: времени свежий кадр ждал бы следующего круга. Пустой опрос теперь
+    #: ничего не стоит — проверка in_waiting и выход.
+    interval = 0.05
 
     def __init__(self, port, engineering: bool = False) -> None:
         super().__init__()
@@ -103,15 +112,19 @@ class Ld2410Source(Source):
         self.last_report: ld2410.Report | None = None
         self.frames = 0
         self.undecoded = 0
-
-    def configure(self) -> None:
-        """Включить инженерный режим — энергия по воротам дальности."""
-        for command in (ld2410.ENABLE_CONFIG, ld2410.ENABLE_ENGINEERING, ld2410.END_CONFIG):
-            self.port.write(command)
+        #: Что не удалось настроить при подъёме. Заполняет hardware.py —
+        #: он владеет портом до того, как источник начнёт его читать.
+        self.setup_problems: list[str] = []
 
     def poll(self, state: State) -> bool:
         waiting = getattr(self.port, "in_waiting", 0)
-        chunk = self.port.read(waiting or 64)
+        if not waiting:
+            # Раньше тут стоял read(64) вслепую, и на пустом порту он ждал
+            # свой таймаут — до 200 мс с остановленным циклом. Страдал не
+            # радар: это время не опрашивались тач и энкодер, и нажатие
+            # «иногда не срабатывало».
+            return False
+        chunk = self.port.read(waiting)
         if not chunk:
             return False
 

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -190,6 +190,52 @@ print(f"\n  смена минуты на Режиме 1, шина 32 МГц:")
 print(f"    полный кадр       {timing(full)}")
 print(f"    только полосами   {timing(bands_only)}   в {full / bands_only:.1f} раза меньше")
 print(f"    плитками          {timing(minute)}   в {full / minute:.1f} раза меньше")
+
+print("\nКеш растров шрифта")
+
+# Кеш обязан быть невидимым: тот же кадр, пиксель в пиксель. Проверка
+# появилась после того, как первая версия кеша молча ломала привязку
+# текста — часы рисовались с уехавшей за экран цифрой, тесты проходили,
+# а заметить это можно было только глазами на живой плате.
+#
+# Проверяем на всех экранах и на двух разных состояниях: ошибка в ключе
+# кеша проявляется именно на втором рисовании, первое всегда честное.
+
+
+def without_cache(size: int, bold: bool = False, weight: str | None = None):
+    name = weight or (theme.BOLD if bold else theme.REGULAR)
+    return ImageFont.truetype(str(theme.FONT_DIR / f"{theme.FONT_FAMILY}-{name}.ttf"), size)
+
+
+def render_all(font_fn) -> list[bytes]:
+    saved, theme.font = theme.font, font_fn
+    try:
+        out = []
+        # Последним повторяем первое время: кеш обязан отдать тот же кадр,
+        # и именно на повторе проверяется, что ключ собран правильно.
+        for moment in (datetime(2026, 8, 19, 14, 32), datetime(2026, 8, 19, 14, 33),
+                       datetime(2026, 8, 19, 9, 5), datetime(2026, 8, 19, 14, 32)):
+            state.now = moment
+            image = Image.new("RGB", (theme.WIDTH, theme.HEIGHT), theme.BG)
+            ClockScreen().render(state, ImageDraw.Draw(image), image)
+            out.append(image.tobytes())
+        return out
+    finally:
+        theme.font = saved
+
+
+theme.font.cache_clear()
+cached_frames = render_all(theme.font)
+plain_frames = render_all(without_cache)
+
+check("кеш не меняет картинку", cached_frames == plain_frames, True)
+check("разное время — разные кадры", cached_frames[0] != cached_frames[1], True)
+check("повтор времени даёт тот же кадр", cached_frames[0] == cached_frames[3], True)
+
+clock_font = theme.font(theme.CLOCK, bold=True)
+check("кеш вообще срабатывает", clock_font.hits > 0, True)
+check("шрифт остаётся настоящим FreeTypeFont",
+      isinstance(clock_font, ImageFont.FreeTypeFont), True)
 
 print(f"\n  провалов: {failed}")
 raise SystemExit(1 if failed else 0)

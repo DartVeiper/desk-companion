@@ -42,9 +42,42 @@ from app.state import State  # noqa: E402
 from app.db import Database  # noqa: E402
 
 CONFIG = HERE / "config.toml"
-TICK = 0.25          # шаг цикла: достаточно отзывчиво для ввода
+
+#: Верхняя граница сна. Цикл просыпается раньше, если какому-то источнику
+#: пора — поэтому это не «шаг», а именно потолок: за него отвечают смена
+#: минуты, правка настроек из браузера и периодический полный кадр.
+#:
+#: Раньше здесь стоял фиксированный шаг 0.25 с, и он давал две беды сразу.
+#: Спали ровно столько ПОСЛЕ работы, то есть период был «работа плюс шаг»:
+#: чем дороже кадр, тем реже опрос. И тач с его собственным периодом 0.05 с
+#: всё равно опрашивался раз в четверть секунды — своё расписание источника
+#: цикл попросту игнорировал.
+IDLE_TICK = 0.5
+#: Минимальный сон. Полностью без сна цикл сжёг бы ядро впустую.
+MIN_NAP = 0.005
+
 FULL_REFRESH_EVERY = 300.0
-MIN_FRAME_GAP = 0.2  # не чаще, чем успевает SPI на полном кадре
+
+#: Потолок паузы между кадрами. Сама пауза считается по стоимости
+#: предыдущего кадра: полный кадр уходит по шине 175 мс, одна полоса — 30,
+#: и держать после дешёвой полосы паузу как после полного кадра незачем.
+#: Смысл паузы — не занимать шину больше половины времени, чтобы на ней
+#: оставалось место тачу (он на той же SPI).
+MAX_FRAME_GAP = 0.25
+
+#: Нижняя граница той же паузы, то есть потолок частоты кадров.
+#:
+#: Нужна, потому что «что-то изменилось» и «изменилось то, что видно» —
+#: разные вещи. Агент на ПК присылает счётчик нажатий каждую секунду, и
+#: кадр считается грязным, даже когда на экране часов этих цифр нет вовсе.
+#: Такая перерисовка стоит двадцать миллисекунд и не отправляет по шине ни
+#: байта — сравнение плиток честно показывает, что картинка та же.
+#:
+#: Восемьдесят миллисекунд человек не замечает (порог «мгновенно» — около
+#: сотни), а процессор освобождается заметно. Меньше процессора — меньше
+#: нагрев, а нагрев здесь не абстракция: датчик воздуха сидит на той же
+#: плате и показывает температуру на три градуса выше комнатной.
+MIN_FRAME_GAP = 0.08
 
 #: Как часто перерисовывать кадр целиком, не спрашивая разницу.
 #: Нужно ради самолечения: частичная перерисовка шлёт только изменившиеся
@@ -129,6 +162,15 @@ class Application:
 
         self._running = False
         self._last_frame = 0.0
+        #: Во что обошёлся последний кадр. По нему считается пауза до
+        #: следующего: дешёвый кадр разрешает следующий почти сразу.
+        self._frame_cost = 0.05
+        #: Кадр просится, но ещё не отрисован. Раньше это был локальный
+        #: признак внутри tick(), и если кадр не пускала пауза — признак
+        #: терялся вместе с ним. Изменение показывалось только тогда, когда
+        #: что-нибудь ещё делало кадр грязным; присутствие могло висеть
+        #: неотрисованным сколько угодно.
+        self._dirty = True
         self._last_full = 0.0
         self._last_minute: int | None = None
         #: Откуда брать «сколько держат прямо сейчас». Каждый элемент —
@@ -142,6 +184,11 @@ class Application:
         self._last_screen: str | None = None
         self._last_status = 0.0
         self.frames = 0
+        #: Счётчики цикла. Считаем всегда: на отладку их не хватало ровно
+        #: тогда, когда она была нужна, а стоят они сложения в проходе.
+        self.ticks = 0
+        self._tick_seconds = 0.0
+        self._last_counters = (0, 0, 0.0)
 
     def _build_screens(self) -> None:
         """Собрать карусель и покой с учётом настроек из браузера."""
@@ -168,6 +215,14 @@ class Application:
 
     def tick(self) -> bool:
         """Один проход. True — кадр был отрисован."""
+        entered = time.monotonic()
+        try:
+            return self._tick()
+        finally:
+            self.ticks += 1
+            self._tick_seconds += time.monotonic() - entered
+
+    def _tick(self) -> bool:
         self.state.now = self.clock()
 
         dirty = self._reload_settings()
@@ -203,10 +258,31 @@ class Application:
             self.display.invalidate()
             dirty = True
 
-        if not dirty or now - self._last_frame < MIN_FRAME_GAP:
+        self._dirty |= dirty
+        if not self._dirty or now - self._last_frame < self._frame_gap():
             return False
+        self._dirty = False
         self._render(screen)
         return True
+
+    def _frame_gap(self) -> float:
+        """Сколько ждать после предыдущего кадра."""
+        return max(MIN_FRAME_GAP, min(MAX_FRAME_GAP, self._frame_cost))
+
+    def _nap(self) -> None:
+        """Поспать до ближайшего дела, а не фиксированный шаг.
+
+        Ближайшее дело — это либо срок опроса какого-то источника, либо
+        конец паузы между кадрами, если кадр уже просится. Всё остальное
+        подождёт до потолка.
+        """
+        now = time.monotonic()
+        wake = now + IDLE_TICK
+        for source in self.sources:
+            wake = min(wake, source.next_at)
+        if self._dirty:
+            wake = min(wake, self._last_frame + self._frame_gap())
+        time.sleep(max(MIN_NAP, wake - now))
 
     def _publish_status(self) -> None:
         """Снимок для дашборда: здоровье блока и живые данные радара.
@@ -217,13 +293,24 @@ class Application:
         now = time.monotonic()
         if now - self._last_status < STATUS_EVERY:
             return
+        elapsed = now - self._last_status
         self._last_status = now
+        ticks, frames, seconds = self._last_counters
+        self._last_counters = (self.ticks, self.frames, self._tick_seconds)
+        loop = {
+            "ticks_per_second": round((self.ticks - ticks) / elapsed, 1),
+            "frames_per_second": round((self.frames - frames) / elapsed, 1),
+            "tick_ms": round((self._tick_seconds - seconds)
+                             / max(1, self.ticks - ticks) * 1000, 2),
+            "busy_percent": round((self._tick_seconds - seconds) / elapsed * 100, 1),
+        }
         try:
-            status_mod.write(status_mod.snapshot(self.state, self.sources))
+            status_mod.write(status_mod.snapshot(self.state, self.sources, loop))
         except OSError:
             pass  # снимок — удобство, а не работа сервиса
 
     def _render(self, screen) -> None:
+        started = time.monotonic()
         frame = Image.new("RGB", (self.display.width, self.display.height), theme.BG)
         screen.render(self.state, ImageDraw.Draw(frame), frame)
         # Полоса прогресса удержания поверх любого экрана. Без неё три
@@ -233,6 +320,9 @@ class Application:
             widgets.hold_overlay(frame, self.director.held_ms)
         self._apply_brightness()
         self.display.show(frame)
+        self._last_frame = time.monotonic()
+        self._frame_cost = self._last_frame - started
+        self.frames += 1
 
     def _apply_brightness(self) -> None:
         """Довести яркость из настроек до подсветки.
@@ -248,8 +338,6 @@ class Application:
         except (AttributeError, NotImplementedError):
             return  # бэкенд разработки подсветки не имеет
         self._last_brightness = level
-        self._last_frame = time.monotonic()
-        self.frames += 1
 
     def _sensor_health(self) -> None:
         """Отказ источника — в строку состояния, а не в лог, который никто
@@ -271,7 +359,7 @@ class Application:
             self.tick()
             if max_seconds and time.monotonic() - started >= max_seconds:
                 break
-            time.sleep(TICK)
+            self._nap()
 
     def stop(self, *_args) -> None:
         self._running = False

@@ -1,22 +1,29 @@
 """Калибровка радара по замеру пустой комнаты.
 
-    python3 tools/radar_calibrate.py
-
-Запускаешь — и уходишь. Даётся полминуты на то, чтобы выйти, дальше две
-минуты записи. Возвращаться до конца не нужно: результат запишется сам.
+    python3 tools/radar_calibrate.py            # всё сразу, минут пять
+    python3 tools/radar_calibrate.py --empty    # только пустая комната
+    python3 tools/radar_calibrate.py --desk     # только «я за столом», 15 с
 
 Зачем. Заводские пороги у LD2410 нарочно щедрые, и радар «видит»
 присутствие там, где его нет: стены, мебель и батарея отражают сигнал не
 хуже человека. На замере с человеком за столом покой светился до седьмого
 метра — это не человек, это комната.
 
-Как лечится. Записываем пустую комнату, берём максимум шума по каждой
+Как лечится. Записываем пустую комнату, берём устойчивый фон по каждой
 зоне и ставим порог выше него. Плюс ограничиваем дальность: если стол в
 метре, реагировать на движение в четырёх метрах не нужно вовсе.
+
+Почему два отдельных замера. Пустая комната требует, чтобы из неё вышли,
+и записывается долго; «я за столом» — пятнадцать секунд не двигаясь. Ждать
+обоих в одном запуске значит требовать от человека выйти ровно тогда, когда
+скажут. Замер пустой комнаты запоминается в файл, и вторую половину можно
+сделать когда угодно потом.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import sys
 import time
@@ -29,23 +36,56 @@ import _service  # noqa: E402
 from app.drivers import ld2410  # noqa: E402
 from app.screens.registry import load_config  # noqa: E402
 
-CONFIG = Path(__file__).resolve().parents[1] / "app" / "config.toml"
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "app" / "config.toml"
+PROFILE = ROOT / "data" / "radar_profile.json"
 GATE_CM = 75
 LEAVE_SECONDS = 30
-RECORD_SECONDS = 120
+RECORD_SECONDS = 180
+DESK_SECONDS = 15
 
 #: Запас над шумом пустой комнаты. Меньше — ложные срабатывания на сквозняк
 #: и качнувшуюся штору; больше — придётся махать руками, чтобы вас заметили.
 MARGIN = 12
 
+#: Какую долю замеров считать «фоном комнаты». Остальные десять процентов —
+#: это как раз хлопнувшая дверь и прошедший мимо человек.
+QUIET = 0.90
 
-def listen(port, seconds: float) -> tuple[list[int], list[int], int]:
-    """Максимумы энергии по зонам за время наблюдения."""
-    moving = [0] * ld2410.GATES
-    static = [0] * ld2410.GATES
+#: Выше этого порог уже бесполезен: шкала энергии кончается на ста, и
+#: зона с таким порогом не сработает никогда.
+CEILING = 88
+
+#: Ворота 0 и 1 статику не отдают — так устроен модуль, у них слишком малая
+#: дальность. Сидящего вплотную человека он держит воротами со второго, и
+#: дальность меньше этой запрашивать бессмысленно.
+MIN_STATIC_GATE = 2
+
+
+def percentile(values: list[int], share: float) -> int:
+    """Значение, ниже которого лежит заданная доля замеров.
+
+    Максимум для порога не годится: одного прохода мимо двери хватает,
+    чтобы испортить четыре минуты записи, а порог по нему уедет в потолок
+    и радар ослепнет. Девяностая доля переживает короткую помеху и при
+    этом честно отражает постоянный фон комнаты.
+    """
+    if not values:
+        return 0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, int(round(share * (len(ordered) - 1))))
+    return ordered[index]
+
+
+def listen(port, seconds: float, label: str = "") -> tuple[list[list[int]], list[list[int]], int]:
+    """Все замеры энергии по зонам за время наблюдения."""
+    moving: list[list[int]] = [[] for _ in range(ld2410.GATES)]
+    static: list[list[int]] = [[] for _ in range(ld2410.GATES)]
     frames_seen = 0
     buffer = b""
-    deadline = time.monotonic() + seconds
+    started = time.monotonic()
+    deadline = started + seconds
+    shown = -1
     while time.monotonic() < deadline:
         buffer += port.read(port.in_waiting or 64)
         frames, buffer = ld2410.extract_frames(buffer)
@@ -55,11 +95,47 @@ def listen(port, seconds: float) -> tuple[list[int], list[int], int]:
                 continue
             frames_seen += 1
             for i, value in enumerate(report.moving_gates[:ld2410.GATES]):
-                moving[i] = max(moving[i], value)
+                moving[i].append(value)
             for i, value in enumerate(report.static_gates[:ld2410.GATES]):
-                static[i] = max(static[i], value)
+                static[i].append(value)
+        if label:
+            left = int(deadline - time.monotonic())
+            if left != shown and left % 15 == 0:
+                shown = left
+                print(f"    {label}: осталось {left} с", flush=True)
         time.sleep(0.05)
     return moving, static, frames_seen
+
+
+def require_engineering(port) -> None:
+    """Без инженерного режима энергии по зонам нет, и мерить нечего."""
+    port.write(ld2410.ENABLE_CONFIG)
+    port.flush()
+    time.sleep(0.1)
+    port.write(ld2410.ENABLE_ENGINEERING)
+    port.flush()
+    time.sleep(0.1)
+    port.write(ld2410.END_CONFIG)
+    port.flush()
+    time.sleep(0.2)
+    port.reset_input_buffer()
+
+
+def table(empty_m, empty_s, desk_m, desk_s, gate_moving, gate_static,
+          desk_gate: int, limit: int) -> None:
+    print("\n  «пусто» — фон комнаты, «ты» — типичное значение за столом.")
+    print("\n  зона  расстояние     пусто(дв/пок)  ты(дв/пок)   порог(дв/пок)")
+    for i in range(ld2410.GATES):
+        if i == desk_gate:
+            mark = "  ← стол"
+        elif i > limit:
+            mark = "  (не смотрим)"
+        else:
+            mark = ""
+        print(f"   {i}   {i * GATE_CM:3}-{(i + 1) * GATE_CM:3} см   "
+              f"{empty_m[i]:3}/{empty_s[i]:3}        "
+              f"{desk_m[i]:3}/{desk_s[i]:3}      "
+              f"{gate_moving[i]:3}/{gate_static[i]:3}{mark}")
 
 
 def write_config(moving: list[int], static: list[int],
@@ -69,7 +145,7 @@ def write_config(moving: list[int], static: list[int],
     block = (
         "# Пороги по зонам дальности, подобраны tools/radar_calibrate.py по\n"
         "# замеру пустой комнаты. Чем больше число, тем менее чувствительна\n"
-        "# зона. Ноль в moving для дальних зон означает «сюда не смотреть».\n"
+        "# зона. Сто в дальних зонах означает «сюда не смотреть».\n"
         f"gate_moving = {moving}\n"
         f"gate_static = {static}\n"
         "# Дальше этих зон радар не смотрит вовсе: движение в другом конце\n"
@@ -88,71 +164,138 @@ def write_config(moving: list[int], static: list[int],
     CONFIG.write_text(text, encoding="utf-8", newline="\n")
 
 
-def main() -> None:
-    _service.require_stopped()
-
+def open_port():
     import serial
 
     cfg = load_config(CONFIG)["radar"]
     port = serial.Serial(cfg["port"], cfg["baud"], timeout=0.3)
-    port.reset_input_buffer()
+    require_engineering(port)
+    return port
 
-    print("\n  Калибровка радара по пустой комнате.\n")
-    print(f"  Сначала — где ты сидишь. Не двигайся, {15} секунд.", flush=True)
-    present_moving, present_static, frames = listen(port, 15)
+
+def record_empty(port, seconds: float, wait: float) -> dict:
+    if wait:
+        print(f"  Теперь ВЫЙДИ из комнаты. Есть {int(wait)} секунд.", flush=True)
+        time.sleep(wait)
+    print(f"  записываю пустую комнату, {int(seconds) // 60} минуты...", flush=True)
+    moving, static, frames = listen(port, seconds, "пустая комната")
     if not frames:
-        print("\n  Радар молчит — калибровать нечего.\n")
-        port.close()
-        raise SystemExit(1)
-
-    desk_gate = max(
-        (i for i, v in enumerate(present_static) if v >= 40),
-        default=max(range(ld2410.GATES), key=lambda i: present_moving[i]),
-    )
-    print(f"  записано, стол примерно в зоне {desk_gate} "
-          f"({desk_gate * GATE_CM}-{(desk_gate + 1) * GATE_CM} см)\n")
-
-    print(f"  Теперь ВЫЙДИ из комнаты. Есть {LEAVE_SECONDS} секунд.", flush=True)
-    time.sleep(LEAVE_SECONDS)
-    print(f"  записываю пустую комнату, {RECORD_SECONDS // 60} минуты...", flush=True)
-    empty_moving, empty_static, frames = listen(port, RECORD_SECONDS)
+        raise SystemExit("\n  Радар молчит — записывать нечего.\n")
+    profile = {
+        "moving": [percentile(v, QUIET) for v in moving],
+        "static": [percentile(v, QUIET) for v in static],
+        "moving_max": [max(v, default=0) for v in moving],
+        "static_max": [max(v, default=0) for v in static],
+        "frames": frames, "seconds": seconds,
+        "at": time.strftime("%d.%m %H:%M"),
+    }
+    PROFILE.parent.mkdir(parents=True, exist_ok=True)
+    PROFILE.write_text(json.dumps(profile, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
     print(f"  записано, кадров {frames}\n", flush=True)
+    return profile
 
-    # Порог — над шумом пустой комнаты. Дальше стола не смотрим вовсе:
-    # там пороги задираем в потолок, и зона перестаёт участвовать.
-    limit = min(ld2410.GATES - 1, desk_gate + 1)
+
+def record_desk(port) -> tuple[list[int], list[int]]:
+    print(f"  Сядь как обычно и не двигайся, {DESK_SECONDS} секунд.", flush=True)
+    moving, static, frames = listen(port, DESK_SECONDS)
+    if not frames:
+        raise SystemExit("\n  Радар молчит — записывать нечего.\n")
+    print("  записано\n", flush=True)
+    # Здесь берём медиану: нужно типичное «человек сидит», а не пик от
+    # того, что он потянулся за кружкой ровно в этот момент.
+    return ([percentile(v, 0.5) for v in moving],
+            [percentile(v, 0.5) for v in static])
+
+
+def finish(desk_m: list[int], desk_s: list[int], profile: dict) -> None:
+    empty_m, empty_s = profile["moving"], profile["static"]
+
+    # Где стол: дальше всего от нуля по превышению над пустой комнатой.
+    # Именно превышение, а не абсолютное значение: в зоне с сильным
+    # отражением от стены энергия высока и без человека.
+    lift = [desk_s[i] - empty_s[i] for i in range(ld2410.GATES)]
+    desk_gate = max(range(MIN_STATIC_GATE, ld2410.GATES), key=lambda i: lift[i])
+    limit = min(ld2410.GATES - 1, max(desk_gate + 1, MIN_STATIC_GATE))
+
     gate_moving, gate_static = [], []
     for i in range(ld2410.GATES):
         if i > limit:
             gate_moving.append(100)
             gate_static.append(100)
             continue
-        gate_moving.append(min(100, empty_moving[i] + MARGIN))
-        gate_static.append(min(100, empty_static[i] + MARGIN))
+        gate_moving.append(min(100, empty_m[i] + MARGIN))
+        gate_static.append(min(100, empty_s[i] + MARGIN))
 
-    print("  зона  расстояние     пусто(дв/пок)  ты(дв/пок)   порог(дв/пок)")
-    for i in range(ld2410.GATES):
-        mark = "  ← стол" if i == desk_gate else ("  (не смотрим)" if i > limit else "")
-        print(f"   {i}   {i * GATE_CM:3}-{(i + 1) * GATE_CM:3} см   "
-              f"{empty_moving[i]:3}/{empty_static[i]:3}        "
-              f"{present_moving[i]:3}/{present_static[i]:3}      "
-              f"{gate_moving[i]:3}/{gate_static[i]:3}{mark}")
+    table(empty_m, empty_s, desk_m, desk_s, gate_moving, gate_static,
+          desk_gate, limit)
+
+    # Если фон в рабочих зонах упёрся в потолок, комната при записи не была
+    # пустой — или модуль смотрит в стену. Записать такие пороги значит
+    # ослепить радар молча, и потом неделю гадать, почему он «сломался».
+    blind = [i for i in range(MIN_STATIC_GATE, limit + 1)
+             if gate_static[i] >= CEILING or gate_moving[i] >= CEILING]
+    if blind:
+        print(f"\n  НЕ ЗАПИСЫВАЮ. В зонах {blind} фон почти на пределе шкалы.")
+        print("  В пустой комнате столько быть не может — значит, при записи")
+        print("  в комнате кто-то был. Такие пороги радар бы просто ослепили.")
+        print("\n  Перезапиши фон, выйдя из комнаты по-настоящему:")
+        print("      python3 tools/radar_calibrate.py --empty\n")
+        raise SystemExit(1)
 
     # Проверка на здравый смысл: если за столом энергии не больше, чем в
     # пустой комнате, порог не поможет — радар просто не различает эти
     # состояния, и дело не в числах, а в установке модуля.
-    if present_static[desk_gate] <= empty_static[desk_gate] + MARGIN:
+    if lift[desk_gate] < MARGIN:
         print("\n  ВНИМАНИЕ: в зоне стола пустая комната даёт почти столько же")
         print("  энергии, сколько человек. Порогом это не лечится — модуль")
         print("  стоит так, что не отличает вас от обстановки. Разверните его")
         print("  на место, где сидите, и уберите отражатели перед ним.\n")
 
     write_config(gate_moving, gate_static, limit, limit)
-    port.close()
-
-    print(f"\n  Записано в app/config.toml. Дальность ограничена зоной {limit} "
-          f"({(limit + 1) * GATE_CM} см).")
+    print(f"\n  Записано в app/config.toml. Стол — зона {desk_gate}, "
+          f"дальность ограничена {(limit + 1) * GATE_CM} см.")
     print("  Перезапусти сервис:  sudo systemctl restart desk-companion\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Калибровка радара")
+    parser.add_argument("--empty", action="store_true",
+                        help="только записать пустую комнату")
+    parser.add_argument("--desk", action="store_true",
+                        help="только замер «я за столом», взять пустую из файла")
+    parser.add_argument("--seconds", type=float, default=RECORD_SECONDS,
+                        help="сколько писать пустую комнату")
+    parser.add_argument("--now", action="store_true",
+                        help="не давать время на выход: комната уже пуста")
+    args = parser.parse_args()
+
+    _service.require_stopped()
+    port = open_port()
+    print("\n  Калибровка радара по пустой комнате.\n")
+
+    try:
+        if args.desk:
+            if not PROFILE.exists():
+                raise SystemExit("\n  Нет замера пустой комнаты. Сначала:\n"
+                                 "      python3 tools/radar_calibrate.py --empty\n")
+            profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+            print(f"  пустая комната из замера от {profile['at']}\n")
+            desk_m, desk_s = record_desk(port)
+            finish(desk_m, desk_s, profile)
+            return
+
+        if args.empty:
+            record_empty(port, args.seconds, 0 if args.now else LEAVE_SECONDS)
+            print("  Когда вернёшься за стол, доделай вторую половину:\n"
+                  "      python3 tools/radar_calibrate.py --desk\n")
+            return
+
+        desk_m, desk_s = record_desk(port)
+        profile = record_empty(port, args.seconds, LEAVE_SECONDS)
+        finish(desk_m, desk_s, profile)
+    finally:
+        port.close()
 
 
 if __name__ == "__main__":

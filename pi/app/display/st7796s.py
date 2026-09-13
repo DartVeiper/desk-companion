@@ -66,7 +66,7 @@ class St7796sDisplay(BandedDisplay):
         set_backlight: Callable[[float], None] | None = None,
         width: int = theme.WIDTH,
         height: int = theme.HEIGHT,
-        chunk: int = 4096,
+        chunk: int = 0,
     ) -> None:
         super().__init__()
         self.width, self.height = width, height
@@ -74,8 +74,15 @@ class St7796sDisplay(BandedDisplay):
         self._set_dc = set_dc
         self._set_reset = set_reset
         self._set_backlight = set_backlight
-        # spidev на Pi не принимает произвольно большие блоки — упираемся в
-        # bufsiz драйвера. Режем сами, чтобы не зависеть от настроек системы.
+        #: Резать ли посылку самим. Ноль — отдавать целиком.
+        #:
+        #: Резали по 4096 байт, считая, что spidev не примет больше своего
+        #: bufsiz. На деле writebytes2 сам разбивает буфер любого размера, и
+        #: делает это в C, одним системным вызовом на всю посылку. Ручная
+        #: нарезка полного кадра на семьдесят пять кусков обходилась в
+        #: 262 мс против 172 мс одним вызовом — треть времени уходила на
+        #: сами вызовы. Параметр остался ради заглушек в тестах и бэкендов,
+        #: которые большой блок действительно не примут.
         self.chunk = chunk
 
     # ------------------------------------------------------------ примитивы
@@ -88,6 +95,9 @@ class St7796sDisplay(BandedDisplay):
 
     def data(self, payload: bytes) -> None:
         self._set_dc(True)
+        if not self.chunk:
+            self._write(payload)
+            return
         for offset in range(0, len(payload), self.chunk):
             self._write(payload[offset:offset + self.chunk])
 

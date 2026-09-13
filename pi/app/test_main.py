@@ -21,6 +21,7 @@ from app.db import Database
 from app.drivers import ld2410, scd41
 from app.inputs.events import Action, EventBus
 from app.inputs.gestures import GestureRecognizer
+from app import hardware
 from app.sources.sensors import Ld2410Source, Scd41Source, TouchSource
 
 failed = 0
@@ -330,10 +331,63 @@ split.port = FakePort(whole[7:])
 split._next_at = 0
 check("вторая половина склеилась", split.tick(split_state), True)
 
-configured = Ld2410Source(FakePort(b""), engineering=True)
-configured.configure()
-check("инженерный режим включается тремя командами",
-      configured.port.written.count(ld2410.CMD_HEAD), 3)
+
+# Настройка модуля. Проверяем именно тот путь, которым идёт сервис: раньше
+# у источника был свой метод configure(), его никто не звал, а инженерный
+# режим в модуль не попадал вовсе — панель калибровки оставалась пустой.
+
+
+class AckPort(FakePort):
+    """Порт, отвечающий на команду подтверждением, как настоящий модуль."""
+
+    def __init__(self, deaf_after: int = 99) -> None:
+        super().__init__(b"")
+        self.commands: list[bytes] = []
+        self.deaf_after = deaf_after
+
+    def write(self, payload: bytes) -> None:
+        self.written += payload
+        self.commands.append(payload)
+        if len(self.commands) <= self.deaf_after:
+            self.stream += (ld2410.CMD_HEAD + b"\x04\x00"
+                            + b"\x00\x00\x00\x00" + ld2410.CMD_TAIL)
+            self.in_waiting = len(self.stream)
+
+    def flush(self) -> None:
+        pass
+
+    def reset_input_buffer(self) -> None:
+        self.stream, self.in_waiting = b"", 0
+
+
+def word_of(frame: bytes) -> int:
+    """Какая команда лежит в кадре."""
+    return int.from_bytes(frame[6:8], "little")
+
+
+plain = AckPort()
+check("без калибровки настройка не молчит",
+      hardware._configure_radar(plain, {"engineering": True}), [])
+words = [word_of(f) for f in plain.commands]
+check("инженерный режим доехал до модуля", 0x0062 in words, True)
+check("настройка закрыта", words[-1], 0x00FE)
+
+calibrated = AckPort()
+hardware._configure_radar(calibrated, {
+    "engineering": True, "max_moving_gate": 3, "max_static_gate": 3,
+    "gate_moving": [20] * 9, "gate_static": [30] * 9,
+})
+words = [word_of(f) for f in calibrated.commands]
+check("пороги всех девяти зон отправлены", words.count(0x0064), 9)
+check("дальность отправлена", 0x0060 in words, True)
+
+# Модуль, замолчавший на середине: жаловаться обязаны, но настройку всё
+# равно закрыть — иначе модуль останется в ней и перестанет слать кадры.
+half_deaf = AckPort(deaf_after=1)
+problems = hardware._configure_radar(half_deaf, {"engineering": True})
+check("о непринятой команде сказано", len(problems) > 0, True)
+check("настройка закрыта даже при сбое",
+      word_of(half_deaf.commands[-1]), 0x00FE)
 
 print("\nИсточник тача")
 

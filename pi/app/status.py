@@ -39,7 +39,8 @@ def default_path() -> Path:
     return FALLBACK_DIR / FILENAME
 
 
-def snapshot(state: State, sources: list | None = None) -> dict:
+def snapshot(state: State, sources: list | None = None,
+             loop: dict | None = None) -> dict:
     """Собрать снимок. Радар отдаёт энергию по воротам, если он в строю."""
     health = state.health
     data = {
@@ -75,6 +76,11 @@ def snapshot(state: State, sources: list | None = None) -> dict:
                      for label, detail, critical in state.problems()],
         "sources": [],
         "radar": None,
+        # Как себя чувствует сам цикл. Без этих трёх чисел вопрос
+        # «почему процессор занят» решается гаданием: проходов много,
+        # кадров много или один проход стал дорогим — снаружи не видно,
+        # а ответы требуют разного лечения.
+        "loop": loop or {},
     }
 
     for source in sources or []:

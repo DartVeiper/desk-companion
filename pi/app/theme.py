@@ -48,6 +48,67 @@ LIGHT, REGULAR, SEMIBOLD, BOLD, EXTRABOLD, BLACK = (
 )
 
 
+class CachedFont(ImageFont.FreeTypeFont):
+    """Шрифт, который помнит уже растеризованные строки.
+
+    Три четверти времени сборки кадра уходило на растеризацию текста:
+    сорок миллисекунд на кадр, из них тридцать — превращение одних и тех
+    же цифр в картинку заново. Часы же меняют время раз в минуту, а
+    подписи на карточках не меняются вовсе. С кешем кадр собирается за
+    семь миллисекунд.
+
+    Наследник, а не обёртка. Обёртка с __getattr__ выглядит аккуратнее и
+    работает — ровно до первого несовпадения версий. Pillow 11 на плате
+    спрашивает у шрифта getmask2, Pillow 12 на машине разработки —
+    getmask; обёртка перехватывала только первый, и на второй Pillow тихо
+    уходил в запасной путь, который не умеет привязку текста (anchor).
+    Часы при этом рисовались с уехавшей за экран последней цифрой, то
+    есть инструменты проверки вёрстки врали бы, не сказав ни слова.
+    Наследник же остаётся настоящим FreeTypeFont со всеми его потрохами,
+    и подменяет только растеризацию.
+
+    Ключ кеша собирается из всех аргументов вызова без разбора, через
+    repr. Разбирать их по именам значит знать сигнатуру конкретной версии
+    Pillow — а именно на этом знании обёртка и погорела.
+    """
+
+    #: Потолок записей. Нужен не ради памяти (растр строки — килобайты), а
+    #: чтобы неограниченно растущий словарь не стал утечкой на устройстве,
+    #: которое работает месяцами.
+    LIMIT = 256
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._masks: dict = {}
+        self.hits = 0
+        self.misses = 0
+
+    def _remember(self, kind: str, args: tuple, kwargs: dict, make):
+        key = (kind, repr(args), repr(sorted(kwargs.items())))
+        found = self._masks.get(key)
+        if found is not None:
+            self.hits += 1
+            return found
+        self.misses += 1
+        result = make()
+        if len(self._masks) >= self.LIMIT:
+            # Простая очистка вместо вытеснения по давности: строк у нас
+            # десятки, до потолка доходит разве что счётчик секунд, и
+            # платить за учёт давности каждым кадром дороже, чем раз в
+            # сутки нарисовать всё заново.
+            self._masks.clear()
+        self._masks[key] = result
+        return result
+
+    def getmask(self, *args, **kwargs):
+        return self._remember(
+            "1", args, kwargs, lambda: super(CachedFont, self).getmask(*args, **kwargs))
+
+    def getmask2(self, *args, **kwargs):
+        return self._remember(
+            "2", args, kwargs, lambda: super(CachedFont, self).getmask2(*args, **kwargs))
+
+
 @lru_cache(maxsize=128)
 def font(size: int, bold: bool = False, weight: str | None = None) -> ImageFont.FreeTypeFont:
     name = weight or (BOLD if bold else REGULAR)
@@ -57,7 +118,10 @@ def font(size: int, bold: bool = False, weight: str | None = None) -> ImageFont.
             f"нет файла шрифта: {path}\n"
             f"положи семейство {FONT_FAMILY} в {FONT_DIR}"
         )
-    return ImageFont.truetype(str(path), size)
+    # Не через ImageFont.truetype: он умеет искать шрифт по системным
+    # папкам и возвращает свой класс. Путь у нас абсолютный и шрифт лежит
+    # в репозитории, так что конструктор вызывается напрямую.
+    return CachedFont(str(path), size)
 
 
 def co2_color(ppm: int | None) -> tuple[int, int, int]:

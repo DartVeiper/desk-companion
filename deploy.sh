@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Доставка кода на Pi.
 #
-#   bash deploy.sh                    # на deskpi.local, в ~/desk-companion
-#   bash deploy.sh alex@192.168.1.42  # если mDNS не работает
+#   bash deploy.sh                    # туда же, куда в прошлый раз
+#   bash deploy.sh alex@192.168.1.42  # новый адрес, он же и запомнится
 #
 # Через tar по ssh, а не scp: scp не умеет исключения, и на плату уезжали бы
 # базы, кеши и сотня отрисованных превью — то есть лишние мегабайты на карту,
@@ -12,7 +12,18 @@
 
 set -euo pipefail
 
-TARGET="${1:-deskpi@deskpi.local}"
+# Адрес запоминаем: из Windows deskpi.local резолвится через раз, и вбивать
+# IP руками при каждой доставке — лишний повод ошибиться. Файл не в репозитории:
+# адрес принадлежит конкретной сети, а не проекту.
+HERE_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REMEMBERED="$HERE_EARLY/.deploy-target"
+if [ -n "${1:-}" ]; then
+    TARGET="$1"
+elif [ -s "$REMEMBERED" ]; then
+    TARGET="$(cat "$REMEMBERED")"
+else
+    TARGET="deskpi@deskpi.local"
+fi
 REMOTE_DIR="${2:-desk-companion}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -36,6 +47,8 @@ if ! ssh -o ConnectTimeout=8 -o BatchMode=no "$TARGET" true 2>/dev/null; then
     printf '      bash deploy.sh %s@192.168.1.42\n\n' "${TARGET%%@*}"
     exit 1
 fi
+
+printf '%s' "$TARGET" > "$REMEMBERED"
 
 # Отпечаток доставляемого кода: его читает диагностика на самом блоке.
 # Без него после каждой доставки непонятно, доехала ли она — а понимать

@@ -104,23 +104,62 @@ def open_touch(cfg: dict, bus: EventBus, width: int, height: int):
     return TouchSource(panel, GestureRecognizer(bus, width))
 
 
+def _add_radar(hardware: Hardware, config: dict) -> None:
+    """Поднять радар и вынести его жалобы наверх.
+
+    Молчащую команду настройки нельзя проглатывать: модуль тогда работает
+    на заводских порогах, видит присутствие в пустой комнате, и понять это
+    можно только удивившись поведению часов через неделю.
+    """
+    source = open_radar(config["radar"])
+    hardware.sources.append(source)
+    hardware.problems += source.setup_problems
+
+
 def open_radar(cfg: dict):
     from .drivers import ld2410
-    from .sources.sensors import PresenceSource
+    from .sources.sensors import Ld2410Source
 
     import serial
 
     port = serial.Serial(cfg["port"], cfg["baud"], timeout=0.2)
-    _configure_radar(port, cfg)
-    return PresenceSource(port, engineering=cfg.get("engineering", True))
+    source = Ld2410Source(port, engineering=cfg.get("engineering", True))
+    source.setup_problems = _configure_radar(port, cfg)
+    return source
 
 
-def _configure_radar(port, cfg: dict) -> None:
-    """Залить в модуль пороги и дальность из конфига.
+def _radar_command(port, frame: bytes, timeout: float = 0.4) -> bool:
+    """Отправить команду и дождаться подтверждения. False — не ответил.
 
-    Без этого настройки лежали бы в config.toml мёртвым грузом: модуль
-    хранит параметры у себя, и пока их туда не отправить, он работает на
-    заводских — а они нарочно щедрые и видят присутствие в пустой комнате.
+    Раньше тут стояла пауза вслепую. Она плоха вдвойне: на короткой команде
+    мы ждём втрое дольше нужного (двенадцать команд — полторы секунды к
+    загрузке), а на неотвеченной делаем вид, что всё прошло. Модуль на
+    каждую команду отвечает своим кадром, так что ждать есть чего.
+    """
+    from .drivers import ld2410
+
+    port.reset_input_buffer()
+    port.write(frame)
+    port.flush()
+    deadline = time.monotonic() + timeout
+    reply = b""
+    while time.monotonic() < deadline:
+        reply += port.read(port.in_waiting or 32)
+        if ld2410.CMD_TAIL in reply:
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def _configure_radar(port, cfg: dict) -> list[str]:
+    """Залить в модуль режим, пороги и дальность из конфига.
+
+    Без этого настройки лежат в config.toml мёртвым грузом: модуль хранит
+    параметры у себя, и пока их туда не отправить, он работает на заводских.
+    Ровно так и вышло с инженерным режимом: в конфиге стояло engineering =
+    true, панель калибровки его ждала, а включал его когда-то давно
+    диагностический скрипт — и первое же отключение питания вернуло модуль
+    к заводскому базовому режиму, где энергии по зонам просто нет.
 
     Команды принимаются только внутри «конфигурации», поэтому её открываем
     и обязательно закрываем: оставленный открытым режим блокирует поток
@@ -130,30 +169,43 @@ def _configure_radar(port, cfg: dict) -> None:
 
     moving = cfg.get("gate_moving")
     static = cfg.get("gate_static")
-    if not moving and not static and "max_moving_gate" not in cfg:
-        return  # не калибровали — не трогаем, пусть работает на заводских
 
-    def send(frame: bytes) -> None:
-        port.write(frame)
+    plan: list[tuple[str, bytes]] = []
+    if "max_moving_gate" in cfg:
+        plan.append(("дальность", ld2410.set_max_gates(
+            int(cfg["max_moving_gate"]), int(cfg["max_static_gate"]),
+            int(cfg.get("idle_seconds", 30)))))
+    if moving and static:
+        for gate, (m, st) in enumerate(zip(moving, static)):
+            plan.append((f"зона {gate}",
+                         ld2410.set_gate_sensitivity(gate, int(m), int(st))))
+    plan.append(("инженерный режим",
+                 ld2410.ENABLE_ENGINEERING if cfg.get("engineering", True)
+                 else ld2410.DISABLE_ENGINEERING))
+
+    problems: list[str] = []
+    if not _radar_command(port, ld2410.ENABLE_CONFIG):
+        # Не отвечает — возможно, завис. Перезагрузка платы его не лечит:
+        # пять вольт с ножек при ней не пропадают, и залипшее состояние
+        # переживает reboot. Собственный перезапуск модуля — единственное
+        # «выключить и включить» без похода к розетке.
+        port.write(ld2410.RESTART)
         port.flush()
-        time.sleep(0.12)
+        time.sleep(1.5)
+        if not _radar_command(port, ld2410.ENABLE_CONFIG):
+            port.reset_input_buffer()
+            return ["радар не принимает команды, работает на заводских"]
 
     try:
-        send(ld2410.ENABLE_CONFIG)
-        if "max_moving_gate" in cfg:
-            send(ld2410.set_max_gates(
-                int(cfg["max_moving_gate"]), int(cfg["max_static_gate"]),
-                int(cfg.get("idle_seconds", 30))))
-        if moving and static:
-            for gate, (m, st) in enumerate(zip(moving, static)):
-                send(ld2410.set_gate_sensitivity(gate, int(m), int(st)))
-        if cfg.get("engineering", True):
-            send(ld2410.ENABLE_ENGINEERING)
+        for label, frame in plan:
+            if not _radar_command(port, frame):
+                problems.append(f"радар не принял: {label}")
     finally:
         # Закрываем даже при сбое: модуль, оставшийся в конфигурации,
         # перестаёт слать кадры, и это выглядит как оборванный провод.
-        send(ld2410.END_CONFIG)
+        _radar_command(port, ld2410.END_CONFIG)
         port.reset_input_buffer()
+    return problems
 
 
 def open_air(cfg: dict):
@@ -215,7 +267,7 @@ def build(config: dict, bus: EventBus, width: int, height: int,
         ("display", lambda: setattr(hardware, "display", open_display(config["display"]))),
         ("encoder", lambda: _add_encoder(hardware, config, bus)),
         ("touch", lambda: _add_touch(hardware, config, bus, width, height)),
-        ("radar", lambda: hardware.sources.append(open_radar(config["radar"]))),
+        ("radar", lambda: _add_radar(hardware, config)),
         ("air", lambda: hardware.sources.append(open_air(config["air"]))),
     )
 

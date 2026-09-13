@@ -34,6 +34,16 @@ class Source(ABC):
         self.ok = True
         self.failures = 0
 
+    @property
+    def next_at(self) -> float:
+        """Когда этот источник ждёт следующего опроса.
+
+        Наружу это нужно главному циклу: он спит до ближайшего срока, а не
+        фиксированный шаг, и без этого расписание источников было чистой
+        декорацией.
+        """
+        return self._next_at
+
     def due(self, now: float | None = None) -> bool:
         return (now or time.monotonic()) >= self._next_at
 
