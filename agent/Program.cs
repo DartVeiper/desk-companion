@@ -25,6 +25,11 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        // Консоль Windows по умолчанию не в UTF-8, и весь русский вывод
+        // агента превращается в крякозябры — включая подсказки, ради которых
+        // он и печатается.
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+
         var host = Argument(args, "--host") ?? "deskpi.local";
         var port = int.TryParse(Argument(args, "--port"), out var p) ? p : 1883;
 
