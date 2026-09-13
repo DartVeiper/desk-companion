@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <!-- Exe, а не WinExe: у оконного приложения нет консоли, и весь вывод
+         агента — включая предупреждение «запусти от администратора, иначе
+         температуры не читаются» — уходил бы в никуда. Первый запуск всегда
+         ручной и всегда из терминала. Прятать окно потом умеет Планировщик
+         задач: там это галочка «Свернуть», а не свойство сборки. -->
+    <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

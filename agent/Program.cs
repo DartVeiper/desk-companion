@@ -67,8 +67,21 @@ internal static class Program
             {
                 if (!client.IsConnected)
                 {
-                    await client.ConnectAsync(options, stopping.Token);
-                    Console.WriteLine("  подключено");
+                    try
+                    {
+                        await client.ConnectAsync(options, stopping.Token);
+                        Console.WriteLine("  подключено");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // Самая частая причина — не брокер, а имя: deskpi.local
+                        // из Windows резолвится через раз. Сказать об этом
+                        // здесь дешевле, чем дать человеку искать самому.
+                        Console.Error.WriteLine($"  не подключиться к {host}:{port} — {ex.Message}");
+                        Console.Error.WriteLine("  если это deskpi.local, попробуй адрес: " +
+                                                "DeskAgent.exe --host 192.168.1.205");
+                        throw;
+                    }
                 }
 
                 var now = DateTime.UtcNow;
