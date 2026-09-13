@@ -102,6 +102,13 @@ def snapshot(state: State, sources: list | None = None,
                 "moving_gates": report.moving_gates,
                 "static_gates": report.static_gates,
             }
+            # Сколько уже накопила копилка уровней. По этому числу видно,
+            # можно ли уже считать пороги: калибровке нужны часы, и без
+            # такого счётчика остаётся только гадать, сколько ещё ждать.
+            levels = getattr(source, "levels", None)
+            if levels is not None:
+                data["radar"]["levels_hours"] = round(levels.hours, 1)
+                data["radar"]["levels_samples"] = levels.samples
     return data
 
 

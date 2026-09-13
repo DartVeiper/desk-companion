@@ -23,6 +23,7 @@ from app.drivers import ld2410, scd41
 from app.inputs.events import Action, EventBus
 from app.inputs.gestures import GestureRecognizer
 from app import hardware
+from app import radar_levels
 from app.sources.sensors import Ld2410Source, Scd41Source, TouchSource
 
 failed = 0
@@ -459,6 +460,38 @@ silent.tick(State(now=datetime(2026, 8, 19, 12, 0)))
 check("радар без кадров сначала не жалуется", silent.healthy, True)
 silent._last_frame_at = time.monotonic() - Ld2410Source.STALE_AFTER - 1
 check("десять секунд тишины — это отказ", silent.healthy, False)
+
+# Копилка уровней радара. Из неё калибровка достаёт и фон пустой комнаты,
+# и уровень присутствия — вместо опыта с выходом из комнаты на пять минут.
+
+levels = radar_levels.Levels()
+# Сутки в миниатюре: треть времени человек за столом, две трети комната
+# пуста. Ровно та картина, ради которой копилка и заведена.
+for _ in range(200):
+    levels.add([90, 80, 70] + [10] * 6, [0, 0, 85, 70] + [30] * 5)
+for _ in range(400):
+    levels.add([8] * 9, [0, 0, 12, 11] + [10] * 5)
+
+near = levels.quantiles(2, (0.05, 0.90))
+check("нижняя доля — фон пустой комнаты", near["static"][0] < 20, True)
+check("верхняя доля — присутствие", near["static"][1] > 60, True)
+check("часы считаются по числу кадров", round(levels.hours, 3),
+      round(600 / 10 / 3600, 3))
+
+# Пустая зона не должна выдумывать уровни.
+empty = radar_levels.Levels()
+check("без замеров доля равна нулю", empty.quantiles(0, (0.5,))["moving"], [0])
+
+with tempfile.TemporaryDirectory() as tmp:
+    saved = Path(tmp) / "levels.json"
+    levels.save(saved)
+    restored = radar_levels.Levels.load(saved)
+    check("копилка читается обратно", restored.samples, levels.samples)
+    check("и распределение то же", restored.quantiles(2, (0.9,)),
+          levels.quantiles(2, (0.9,)))
+    (Path(tmp) / "битый.json").write_text("{не json", encoding="utf-8")
+    check("битый файл не роняет, а даёт пустую",
+          radar_levels.Levels.load(Path(tmp) / "битый.json").samples, 0)
 
 # Текущий трек. Топик приходит с признаком «сохранять», чтобы после
 # перезапуска блока музыка появилась сразу, не дожидаясь следующей песни.

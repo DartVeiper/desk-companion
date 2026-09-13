@@ -1,8 +1,19 @@
 """Калибровка радара по замеру пустой комнаты.
 
-    python3 tools/radar_calibrate.py            # всё сразу, минут пять
+    python3 tools/radar_calibrate.py --auto     # по накопленному, без опыта
+    python3 tools/radar_calibrate.py            # опытом, минут пять
     python3 tools/radar_calibrate.py --empty    # только пустая комната
     python3 tools/radar_calibrate.py --desk     # только «я за столом», 15 с
+
+Обычный способ — --auto. Блок круглосуточно считает, сколько раз каждая
+зона показывала каждый уровень энергии, и за сутки комната сама бывает и
+пустой, и занятой. В накопленном распределении обе картины уже есть:
+нижние доли отвечают пустой комнате, верхние — присутствию. Никуда
+выходить не надо, и одна случайность ничего не портит — в отличие от
+опыта на четыре минуты, который портит один проход мимо двери.
+
+Опыт остаётся для случая «надо прямо сейчас»: он даёт ответ за пять минут,
+а копилке нужны часы.
 
 Зачем. Заводские пороги у LD2410 нарочно щедрые, и радар «видит»
 присутствие там, где его нет: стены, мебель и батарея отражают сигнал не
@@ -55,6 +66,15 @@ QUIET = 0.90
 #: Выше этого порог уже бесполезен: шкала энергии кончается на ста, и
 #: зона с таким порогом не сработает никогда.
 CEILING = 88
+
+#: Доли распределения для расчёта по копилке. Нижняя — фон пустой комнаты:
+#: даже если человек дома почти весь день, пять процентов времени комната
+#: пуста наверняка. Верхняя — уровень присутствия.
+EMPTY_SHARE, BUSY_SHARE = 0.05, 0.90
+
+#: Меньше этого копилке верить рано: за час комната могла не побывать
+#: пустой ни разу, и «фон» окажется человеком.
+MIN_HOURS = 6.0
 
 #: Ворота 0 и 1 статику не отдают — так устроен модуль, у них слишком малая
 #: дальность. Сидящего вплотную человека он держит воротами со второго, и
@@ -258,8 +278,90 @@ def finish(desk_m: list[int], desk_s: list[int], profile: dict) -> None:
     print("  Перезапусти сервис:  sudo systemctl restart desk-companion\n")
 
 
+def from_levels() -> None:
+    """Посчитать пороги по копилке, накопленной сервисом."""
+    from app.radar_levels import Levels
+
+    path = ROOT / "data" / "radar_levels.json"
+    levels = Levels.load(path)
+    if not levels.samples:
+        raise SystemExit(
+            "\n  Копилка пуста. Её наполняет сам сервис, пока работает, —\n"
+            "  проверь, что радар поднялся: journalctl -u desk-companion\n")
+
+    print(f"  копится {levels.hours:.1f} ч, замеров {levels.samples}\n")
+    if levels.hours < MIN_HOURS:
+        raise SystemExit(
+            f"  Мало данных: нужно хотя бы {MIN_HOURS:.0f} часов.\n"
+            "  За меньшее время комната могла не побывать пустой ни разу,\n"
+            "  и «фоном» окажется человек за столом. Оставь блок работать\n"
+            "  и вернись позже — копилка переживает перезагрузку.\n"
+            "  Если нужно прямо сейчас: python3 tools/radar_calibrate.py\n")
+
+    shares = (EMPTY_SHARE, 0.5, BUSY_SHARE)
+    empty_m, empty_s, busy_m, busy_s, mid_s = [], [], [], [], []
+    for gate in range(ld2410.GATES):
+        q = levels.quantiles(gate, shares)
+        empty_m.append(q["moving"][0])
+        empty_s.append(q["static"][0])
+        mid_s.append(q["static"][1])
+        busy_m.append(q["moving"][2])
+        busy_s.append(q["static"][2])
+
+    # Где стол: там, где присутствие сильнее всего отличается от фона.
+    # Именно разница, а не сама энергия: у зоны, смотрящей в стену, энергия
+    # высока всегда, и по абсолютной величине она обгонит человека.
+    spread = [busy_s[i] - empty_s[i] for i in range(ld2410.GATES)]
+    desk_gate = max(range(MIN_STATIC_GATE, ld2410.GATES), key=lambda i: spread[i])
+    limit = min(ld2410.GATES - 1, max(desk_gate + 1, MIN_STATIC_GATE))
+
+    gate_moving, gate_static = [], []
+    for i in range(ld2410.GATES):
+        if i > limit:
+            gate_moving.append(100)
+            gate_static.append(100)
+            continue
+        gate_moving.append(min(100, empty_m[i] + MARGIN))
+        gate_static.append(min(100, empty_s[i] + MARGIN))
+
+    print("  зона  расстояние    фон(дв/пок)  занято(дв/пок)  порог(дв/пок)")
+    for i in range(ld2410.GATES):
+        if i == desk_gate:
+            mark = "  ← стол"
+        elif i > limit:
+            mark = "  (не смотрим)"
+        else:
+            mark = ""
+        print(f"   {i}   {i * GATE_CM:3}-{(i + 1) * GATE_CM:3} см   "
+              f"{empty_m[i]:3}/{empty_s[i]:3}        "
+              f"{busy_m[i]:3}/{busy_s[i]:3}        "
+              f"{gate_moving[i]:3}/{gate_static[i]:3}{mark}")
+
+    blind = [i for i in range(MIN_STATIC_GATE, limit + 1)
+             if gate_static[i] >= CEILING or gate_moving[i] >= CEILING]
+    if blind:
+        print(f"\n  НЕ ЗАПИСЫВАЮ. В зонах {blind} даже фон почти на пределе")
+        print("  шкалы. Это значит, что комната за всё время наблюдения ни")
+        print("  разу не была пустой, либо радар смотрит в отражатель.\n")
+        raise SystemExit(1)
+
+    if spread[desk_gate] < 2 * MARGIN:
+        print("\n  ВНИМАНИЕ: присутствие почти не отличается от фона даже в")
+        print("  лучшей зоне. Порогом это не лечится — модуль стоит так, что")
+        print("  не различает вас и обстановку. Разверни его на место, где")
+        print("  сидишь, и убери отражатели перед ним.\n")
+        raise SystemExit(1)
+
+    write_config(gate_moving, gate_static, limit, limit)
+    print(f"\n  Записано в app/config.toml. Стол — зона {desk_gate}, "
+          f"дальность ограничена {(limit + 1) * GATE_CM} см.")
+    print("  Перезапусти сервис:  sudo systemctl restart desk-companion\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Калибровка радара")
+    parser.add_argument("--auto", action="store_true",
+                        help="посчитать по накопленному, ничего не делая руками")
     parser.add_argument("--empty", action="store_true",
                         help="только записать пустую комнату")
     parser.add_argument("--desk", action="store_true",
@@ -269,6 +371,13 @@ def main() -> None:
     parser.add_argument("--now", action="store_true",
                         help="не давать время на выход: комната уже пуста")
     args = parser.parse_args()
+
+    if args.auto:
+        # Порт не трогаем вовсе: считаем по тому, что сервис уже накопил.
+        # Значит и останавливать его не надо — часы продолжают работать.
+        print("\n  Калибровка радара по накопленной статистике.\n")
+        from_levels()
+        return
 
     _service.require_stopped()
     port = open_port()

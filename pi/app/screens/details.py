@@ -48,8 +48,18 @@ class WeatherDetail(DetailScreen):
 
         boxes = w.row(width, 196, height - w.PAD, 2)
         room = state.env.temperature
-        delta = "—" if room is None else f"{room - out.temp:+.1f}°"
-        w.stat_card(draw, boxes[0], delta, "теплее, чем на улице")
+        # Показываем температуру комнаты, а разницу уносим в подпись.
+        # Раньше в карточке стояла сама разница — крупное «+16°» под
+        # словами «теплее, чем на улице». Два абсолютных числа читаются
+        # однозначно всегда, одинокая разница — нет: её принимают за
+        # температуру, и экран начинает врать, не сказав ни слова неправды.
+        if room is None:
+            w.stat_card(draw, boxes[0], "—", "в комнате")
+        else:
+            w.stat_card(draw, boxes[0], f"{room:.1f}°",
+                        f"в комнате, на {room - out.temp:.0f}° теплее"
+                        if room >= out.temp else
+                        f"в комнате, на {out.temp - room:.0f}° холоднее")
         w.stat_card(draw, boxes[1], state.now.strftime("%H:%M"), "данные на")
 
 

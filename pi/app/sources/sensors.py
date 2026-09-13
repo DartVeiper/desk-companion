@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import time
 
+from pathlib import Path
+
 from ..drivers import ld2410, scd41
+from ..radar_levels import Levels
 from ..state import State
 from .base import Source
 
@@ -156,10 +159,22 @@ class Ld2410Source(Source):
     #: ничего не стоит — проверка in_waiting и выход.
     interval = 0.05
 
-    def __init__(self, port, engineering: bool = False) -> None:
+    #: Как часто сбрасывать накопленное на карту. Раз в полчаса — это
+    #: десять килобайт, то есть ничто по сравнению с самой базой; чаще
+    #: писать незачем, реже — обидно терять статистику при выключении.
+    SAVE_EVERY = 1800.0
+
+    def __init__(self, port, engineering: bool = False,
+                 levels_path: Path | None = None) -> None:
         super().__init__()
         self.port = port
         self.engineering = engineering
+        #: Сколько раз каждая зона показывала каждый уровень энергии.
+        #: Из этой копилки калибровка потом достаёт и фон пустой комнаты,
+        #: и уровень присутствия — не требуя ставить опыт.
+        self.levels = Levels()
+        self.levels_path = levels_path
+        self._saved_at = 0.0
         self._buffer = b""
         #: Последний разобранный отсчёт. Отдаётся панели калибровки: без
         #: энергии по зонам подбор порогов — гадание (п.9 плана).
@@ -203,6 +218,9 @@ class Ld2410Source(Source):
 
         self.last_report = report
         self._last_frame_at = time.monotonic()
+        if report.moving_gates:
+            self.levels.add(report.moving_gates, report.static_gates)
+            self._maybe_save()
         if report.present == state.desk.presence:
             return False
 
@@ -211,6 +229,27 @@ class Ld2410Source(Source):
         state.desk.presence = report.present
         state.desk.presence_since = state.now
         return True
+
+    def _maybe_save(self) -> None:
+        now = time.monotonic()
+        if self.levels_path is None or now - self._saved_at < self.SAVE_EVERY:
+            return
+        self._saved_at = now
+        try:
+            self.levels.save(self.levels_path)
+        except OSError:
+            pass  # копилка — удобство, а не работа сервиса
+
+    def close(self) -> None:
+        if self.levels_path is not None:
+            try:
+                self.levels.save(self.levels_path)
+            except OSError:
+                pass
+        try:
+            self.port.close()
+        except (OSError, AttributeError):
+            pass
 
     @property
     def healthy(self) -> bool:
@@ -221,12 +260,6 @@ class Ld2410Source(Source):
         if not self._last_frame_at:
             return True
         return time.monotonic() - self._last_frame_at < self.STALE_AFTER
-
-    def close(self) -> None:
-        try:
-            self.port.close()
-        except (OSError, AttributeError):
-            pass
 
 
 class TouchSource(Source):

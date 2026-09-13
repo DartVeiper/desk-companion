@@ -16,8 +16,11 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from pathlib import Path
+
 from .display.base import Display
 from .drivers import scd41, xpt2046
+from .radar_levels import Levels
 from .inputs.events import EventBus
 from .sources.base import Source
 
@@ -123,7 +126,12 @@ def open_radar(cfg: dict):
     import serial
 
     port = serial.Serial(cfg["port"], cfg["baud"], timeout=0.2)
-    source = Ld2410Source(port, engineering=cfg.get("engineering", True))
+    # Копилка уровней лежит рядом с кодом, в data/. Путь задаём отсюда:
+    # источник не должен знать, где на этой машине живут файлы.
+    levels = Path(__file__).resolve().parent.parent / "data" / "radar_levels.json"
+    source = Ld2410Source(port, engineering=cfg.get("engineering", True),
+                          levels_path=levels)
+    source.levels = Levels.load(levels)
     source.setup_problems = _configure_radar(port, cfg)
     return source
 
@@ -227,7 +235,12 @@ def open_air(cfg: dict):
     return Scd41Source(
         sensor,
         disable_asc=cfg.get("disable_asc", True),
-        temperature_offset=cfg.get("temperature_offset") or None,
+        # Именно get(), без "or None": ноль в Python ложный, и запись
+        # temperature_offset = 0.0 превращалась в None, то есть в «не
+        # трогать». Датчик оставался на заводских четырёх градусах, а
+        # конфиг уверял, что поправки нет. Отсутствие ключа и ноль — разные
+        # вещи, и путать их нельзя нигде, где ноль осмысленное значение.
+        temperature_offset=cfg.get("temperature_offset"),
     )
 
 
