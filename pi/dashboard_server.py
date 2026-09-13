@@ -192,13 +192,19 @@ def api_health() -> dict:
     """Пока то, что видно из самой базы. Живые датчики приедут вместе с Pi."""
     first, last = _db.span()
     size = _db.size_bytes()
+    stored = _db.stored_bytes()
     counts = {table: _db.conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"]
               for table in ("activity_minute", "env_readings", "state_events")}
     days = max(1, (last - first).days + 1) if first else 1
-    daily = size / days
+    # Рост считаем по самой базе. Журнал WAL в неё не входит: он упирается
+    # в потолок около четырёх мегабайт и переиспользуется, а не копится.
+    # Пока дней мало, прикидка завышена — в размер входит разметка таблиц,
+    # которая заводится один раз.
+    daily = stored / days
     return {
         "db_path": str(_db.path),
-        "db_size_kb": round(size / 1024),
+        "db_size_kb": round(stored / 1024),
+        "disk_kb": round(size / 1024),
         "rows": counts,
         "first_day": first.date().isoformat() if first else None,
         "last_day": last.date().isoformat() if last else None,
@@ -206,6 +212,7 @@ def api_health() -> dict:
         # заранее понимать, во что превратится база через год.
         "kb_per_day": round(daily / 1024, 1),
         "year_mb": round(daily * 365 / 1024 / 1024, 1),
+        "days_counted": days,
     }
 
 
