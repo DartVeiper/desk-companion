@@ -117,14 +117,18 @@ def api_live() -> dict:
 
 # Каталог режимов по п.10 плана. Порядок здесь — порядок в списке настроек,
 # а не на устройстве: на устройстве порядок задаёт сам пользователь.
+# Номеров в подписях нет намеренно: порядок задаётся перетаскиванием, и
+# зашитая нумерация начала бы врать при первой же перестановке.
+# Ручного статуса здесь нет — он накладка по удержанию, а не режим карусели.
 SCREEN_CATALOG = (
-    ("clock.ClockScreen", "1. Часы и погода"),
-    ("activity.ActivityScreen", "2. Активность"),
-    ("away.AwayScreen", "3. Меня нет"),
-    ("manual.ManualScreen", "4. Ручной статус"),
-    ("hardware.HardwareScreen", "5. GPU / CPU"),
-    ("anomaly.AnomalyScreen", "6. Аномалия"),
-    ("streak.StreakScreen", "7. Стрик привычек"),
+    ("clock.ClockScreen", "Часы и погода"),
+    ("details.WeatherDetail", "Погода подробно"),
+    ("details.AirDetail", "Воздух подробно"),
+    ("activity.ActivityScreen", "Активность"),
+    ("away.AwayScreen", "Меня нет"),
+    ("hardware.HardwareScreen", "GPU / CPU"),
+    ("anomaly.AnomalyScreen", "Аномалия"),
+    ("streak.StreakScreen", "Стрик привычек"),
 )
 AMBIENT_CATALOG = (
     ("ambient.BigDigitsAmbient", "Крупные цифры"),
@@ -136,10 +140,16 @@ AMBIENT_CATALOG = (
 def api_settings() -> dict:
     current = settings.load()
     config = settings.apply(load_config(CONFIG_PATH))
+    enabled = list(config["screens"]["enabled"])
+    labels = dict(SCREEN_CATALOG)
+    # Сначала включённые — в том порядке, в каком их листает устройство;
+    # следом выключенные. Список на странице и есть карусель, поэтому
+    # порядок здесь обязан совпадать с настоящим.
+    ordered = [k for k in enabled if k in labels]
+    ordered += [k for k, _ in SCREEN_CATALOG if k not in enabled]
     return {
-        "screens": [{"key": k, "label": label,
-                     "on": k in config["screens"]["enabled"]}
-                    for k, label in SCREEN_CATALOG],
+        "screens": [{"key": k, "label": labels[k], "on": k in enabled}
+                    for k in ordered],
         "ambient": [{"key": k, "label": label,
                      "on": k in config.get("ambient", {}).get("enabled", [])}
                     for k, label in AMBIENT_CATALOG],
@@ -159,7 +169,10 @@ def save_settings(payload: dict) -> dict:
     if isinstance(payload.get("screens"), list):
         # Хотя бы один режим должен остаться: пустая карусель — это чёрный
         # экран без способа что-либо вернуть с самого устройства.
-        chosen = [k for k, _ in SCREEN_CATALOG if k in payload["screens"]]
+        # Порядок берём из присланного списка, а не из каталога: иначе
+        # перетаскивание на странице не значило бы ничего.
+        known = {k for k, _ in SCREEN_CATALOG}
+        chosen = [k for k in payload["screens"] if k in known]
         values["screens.enabled"] = chosen or [SCREEN_CATALOG[0][0]]
     if isinstance(payload.get("ambient"), list):
         values["ambient.enabled"] = [k for k, _ in AMBIENT_CATALOG if k in payload["ambient"]]
@@ -273,6 +286,12 @@ td.n{text-align:right}
 .gates .num{font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;
   text-align:right;min-width:56px}
 .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+.order{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.ord{display:flex;align-items:center;gap:8px;border-radius:9px;background:var(--plane)}
+.ord.drag{opacity:.4}
+.ord.over{box-shadow:0 0 0 2px var(--s1)}
+.ord .opt{flex:1;background:none}
+.grip{padding:0 4px 0 10px;color:var(--muted);cursor:grab;font-size:15px;user-select:none}
 .opt{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;
   background:var(--plane);cursor:pointer}
 .opt:hover{box-shadow:0 0 0 1px var(--ring)}
@@ -554,9 +573,46 @@ async function radar(){
 async function settingsTab(){
   const d = await get('/api/settings');
   const v = d.values;
+  const rowBox = item =>
+    `<li class=ord draggable=true data-key="${item.key}">
+       <span class=grip>⠿</span>
+       <label class=opt><input type=checkbox data-group=screens value="${item.key}"
+         ${item.on?'checked':''}> ${esc(item.label)}</label></li>`;
   const box = (item, group) =>
     `<label class=opt><input type=checkbox data-group=${group} value="${item.key}"
       ${item.on?'checked':''}> ${esc(item.label)}</label>`;
+  // Перетаскивание порядка. Своими руками, без библиотеки: правил тут
+  // немного, а лишняя зависимость в странице, которую отдаёт сам блок,
+  // означала бы либо интернет при загрузке, либо копию файла на карте.
+  const wireDrag = () => {
+    const list = document.getElementById('order');
+    if (!list) return;
+    let dragged = null;
+    list.querySelectorAll('.ord').forEach(row => {
+      row.addEventListener('dragstart', e => {
+        dragged = row; row.classList.add('drag');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      row.addEventListener('dragend', () => {
+        row.classList.remove('drag');
+        list.querySelectorAll('.ord').forEach(r => r.classList.remove('over'));
+      });
+      row.addEventListener('dragover', e => {
+        e.preventDefault();
+        if (row !== dragged) row.classList.add('over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        row.classList.remove('over');
+        if (!dragged || row === dragged) return;
+        const rows = [...list.querySelectorAll('.ord')];
+        const before = rows.indexOf(dragged) < rows.indexOf(row);
+        row.parentNode.insertBefore(dragged, before ? row.nextSibling : row);
+      });
+    });
+  };
+
   const num = (key, label, min, max, step, unit) =>
     `<div class=row><label>${label}</label>
       <input type=range name="${key}" min=${min} max=${max} step=${step} value="${v[key]}"
@@ -565,9 +621,10 @@ async function settingsTab(){
 
   document.getElementById('settings').innerHTML = `
     <div class=card><h2>Какие режимы листать</h2>
-      <div class=opts>${d.screens.map(s=>box(s,'screens')).join('')}</div>
-      <p class=muted>Порядок на устройстве — как в этом списке. Снять все нельзя:
-      пустая карусель это чёрный экран, с которого уже ничего не вернуть.</p></div>
+      <ol class=order id=order>${d.screens.map(s=>rowBox(s)).join('')}</ol>
+      <p class=muted>Перетаскивай за ручку — так и будет листаться крутилкой.
+      Снять все нельзя: пустая карусель это чёрный экран, с которого уже
+      ничего не вернуть.</p></div>
 
     <div class=card><h2>Стили экрана покоя</h2>
       <div class=opts>${d.ambient.map(s=>box(s,'ambient')).join('')}</div>
@@ -586,6 +643,10 @@ async function settingsTab(){
 
     <div class=btnrow><button id=save>Применить</button>
       <span id=saved class=muted></span></div>`;
+
+  // Порядок в запросе берётся из порядка элементов на странице, а его
+  // меняет перетаскивание — отдельного поля не нужно.
+  wireDrag();
 
   document.getElementById('save').onclick = async () => {
     const pick = g => [...document.querySelectorAll(`input[data-group=${g}]:checked`)]
