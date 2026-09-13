@@ -366,6 +366,12 @@ def main() -> None:
         kit = hardware.build(load_config(CONFIG), app.bus,
                              app.display.width, app.display.height)
         app.attach(kit.display, kit.sources, kit.hold_providers, kit.encoder)
+
+        # Заставку показываем сразу, как только поднялся экран: до первых
+        # данных ещё секунды, и тёмный экран в это время выглядит поломкой.
+        if kit.display is not None:
+            kit.display.show(widgets.splash(kit.display.width, kit.display.height,
+                                            "поднимаю датчики"))
         for problem in kit.problems:
             # Не падаем: собирать блок вы будете по узлам, и на каждом шаге
             # должно быть видно, что уже работает, а что ещё нет.

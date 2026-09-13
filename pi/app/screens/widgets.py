@@ -130,6 +130,31 @@ def hold_overlay(frame: Image.Image, held_ms: float) -> None:
               font=theme.font(theme.TINY), fill=theme.DIM, anchor="mm")
 
 
+def splash(width: int, height: int, note: str = "") -> Image.Image:
+    """Кадр «блок просыпается».
+
+    Нужен потому, что от подачи питания до первых данных проходят секунды:
+    грузится система, поднимается сеть, опрашиваются датчики. Тёмный экран
+    всё это время читается как «не включилось» — человек тянется выдернуть
+    питание ровно тогда, когда всё идёт нормально.
+    """
+    frame = Image.new("RGB", (width, height), theme.BG)
+    draw = ImageDraw.Draw(frame)
+
+    draw.text((width / 2, height / 2 - 26), "Desk Companion",
+              font=theme.font(theme.H1, bold=True), fill=theme.FG, anchor="mm")
+    draw.text((width / 2, height / 2 + 10), note or "просыпаюсь",
+              font=theme.font(theme.SMALL), fill=theme.DIM, anchor="mm")
+
+    # Полоса не показывает прогресс: его неоткуда взять, а врущий индикатор
+    # хуже честного отсутствия. Она просто говорит, что блок жив.
+    bar = (width / 2 - 90, height / 2 + 44, width / 2 + 90, height / 2 + 50)
+    draw.rounded_rectangle(bar, radius=3, fill=theme.LINE)
+    draw.rounded_rectangle((bar[0], bar[1], bar[0] + 60, bar[3]),
+                           radius=3, fill=theme.ACCENT)
+    return frame
+
+
 def card(draw: ImageDraw.ImageDraw, box: Box, fill: Color | None = None) -> None:
     draw.rounded_rectangle(box, radius=14, fill=fill or theme.SURFACE)
 

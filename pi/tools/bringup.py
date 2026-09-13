@@ -77,15 +77,25 @@ def step_kernel(cfg: dict) -> None:
 
 def step_i2c(cfg: dict) -> None:
     head("Опрос шины I2C")
+    # Сканируем сами, а не через i2cdetect: он лежит в /usr/sbin, которого
+    # нет в пути обычного пользователя, и шаг падал с «нет такого файла»
+    # на исправной шине с исправным датчиком.
     try:
-        out = subprocess.run(["i2cdetect", "-y", "1"], capture_output=True,
-                             text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError) as exc:
-        report(False, "i2cdetect", str(exc), "sudo apt install i2c-tools")
-        return
+        import smbus2
 
-    found = {int(token, 16) for line in out.splitlines()[1:]
-             for token in line.split()[1:] if token not in ("--", "UU")}
+        bus = smbus2.SMBus(1)
+        found = set()
+        for address in range(0x03, 0x78):
+            try:
+                bus.write_quick(address)
+                found.add(address)
+            except OSError:
+                pass
+        bus.close()
+    except Exception as exc:  # noqa: BLE001
+        report(False, "опрос шины", f"{type(exc).__name__}: {exc}",
+               "нужен python3-smbus2: sudo bash setup-step2.sh")
+        return
     print("   ", " ".join(f"0x{a:02x}" for a in sorted(found)) or "пусто")
 
     report(0x62 in found, "SCD41 на 0x62",
