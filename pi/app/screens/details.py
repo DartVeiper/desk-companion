@@ -9,6 +9,7 @@ from __future__ import annotations
 from PIL import Image, ImageDraw
 
 from .. import theme
+from . import weather_icons as icons
 from ..state import State
 from . import widgets as w
 from .base import DetailScreen
@@ -32,8 +33,19 @@ class WeatherDetail(DetailScreen):
 
         draw.text((theme.PAD + 6, 128), f"{out.temp:+.0f}°",
                   font=theme.font(96, weight=theme.EXTRABOLD), fill=theme.FG, anchor="ls")
-        draw.text((theme.PAD + 8, 162), out.cond or "—",
-                  font=theme.font(theme.BODY), fill=theme.DIM, anchor="lm")
+        # Значок рядом со словом, под температурой. Правее нельзя: там
+        # живёт блок осадков во всю высоту, и крупный значок наезжал на
+        # него — это поймал обход вёрстки.
+        icons.draw_icon(draw, theme.PAD + 2, 140, 46, out.code, out.is_day,
+                        back=theme.BG)
+        # Правее 238 начинается блок осадков, поэтому слово обрезаем по
+        # оставшемуся месту: «сильный снегопад с метелью» иначе въезжает
+        # прямо в него.
+        cond_font = theme.font(theme.BODY)
+        cond_left = theme.PAD + 54
+        draw.text((cond_left, 162),
+                  w.ellipsize(draw, out.cond or "—", 230 - cond_left, cond_font),
+                  font=cond_font, fill=theme.DIM, anchor="lm")
 
         if out.rain_soon_minutes is not None:
             box = (238, 74, width - w.PAD, 178)

@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 
 from .. import theme
 from ..state import State
+from . import weather_icons as icons
 from . import widgets as w
 from .base import Screen
 
@@ -101,8 +102,21 @@ class ClockScreen(Screen):
         # прыгает: меняется только содержимое одной полосы.
         self._subtitle(draw, width, state)
 
-        for box, (value, caption, cell_color) in zip(self.card_boxes(width, height), cells(state)):
-            w.stat_card(draw, box, value, caption, cell_color)
+        boxes = self.card_boxes(width, height)
+        out = state.weather
+        for index, (box, cell) in enumerate(zip(boxes, cells(state))):
+            value, caption, cell_color = cell
+            icon = None
+            if index == 0 and out.temp is not None:
+                # Со значком подпись называет только место: погоду словом
+                # дублировать незачем, а места в карточке мало.
+                caption = "на улице"
+
+                def icon(draw_on, x, y, size):
+                    icons.draw_icon(draw_on, x, y, size, out.code, out.is_day,
+                                    back=theme.SURFACE)
+
+            w.stat_card(draw, box, value, caption, cell_color, icon=icon)
 
     @staticmethod
     def _subtitle(draw: ImageDraw.ImageDraw, width: int, state: State) -> None:
@@ -123,17 +137,20 @@ class ClockScreen(Screen):
                       fill=theme.ACCENT, anchor="rm")
             right += draw.textlength(warning, font=tiny) + GAP
 
+        left, available = theme.PAD, width - theme.PAD - right
+
         track = state.now_playing
         if not track:
-            # Дата короткая, ей хватает и остатка; центрируем по экрану,
-            # чтобы она не гуляла туда-сюда от появления дождя.
-            draw.text((width / 2, 176), date_text(state), font=font,
+            # Дату тоже центрируем по остатку, а не по всему экрану:
+            # «понедельник, 14 сентября» въезжало прямо в предупреждение о
+            # дожде. Обход вёрстки этого не видел — в его состоянии играла
+            # музыка, и проверялась другая ветка.
+            text = w.ellipsize(draw, date_text(state), available, font)
+            draw.text((left + available / 2, 176), text, font=font,
                       fill=theme.DIM, anchor="mm")
             return
 
-        # Трек центрируем по тому, что осталось, а не по всему экрану:
-        # иначе при длинном названии середина уезжает под правую подпись.
-        left, available = theme.PAD, width - theme.PAD - right
+        # Трек центрируем по тому же остатку.
         text = w.ellipsize(draw, track, available - NOTE_WIDTH - GAP, font)
         span = NOTE_WIDTH + GAP + draw.textlength(text, font=font)
         start = left + (available - span) / 2

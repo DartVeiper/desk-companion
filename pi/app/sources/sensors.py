@@ -32,6 +32,18 @@ class Scd41Source(Source):
     #: — это уже не «не успел», а отказ.
     STALE_AFTER = 60.0
 
+    #: Сколько датчик приходит в себя после запуска измерения.
+    #:
+    #: SCD41 вычитает из показаний собственный нагрев, и модель этого
+    #: нагрева живёт только пока идёт измерение. После start() она
+    #: начинается заново, и первые минуты датчик завышает температуру
+    #: примерно на четыре градуса. Замерено на живой плате: 30,5 °C сразу
+    #: после перезапуска, 26,5 через четыре минуты, дальше ровно.
+    #:
+    #: На экране это видно недолго и само проходит, а вот в историю такие
+    #: показания попадать не должны: по ней потом будут считать аномалии.
+    SETTLE_SECONDS = 240.0
+
     name = "env"
     #: Датчик обновляет показания раз в пять секунд, но фазу его цикла мы
     #: не знаем. Спрашивать ровно раз в пять секунд значит в худшем случае
@@ -52,6 +64,7 @@ class Scd41Source(Source):
         #: при обычных перезапусках — иначе настройка не сохраняется.
         self.persisted = 0
         self._last_good = 0.0
+        self._started_at = 0.0
 
     def start(self) -> None:
         """Настроить и запустить измерения.
@@ -84,6 +97,7 @@ class Scd41Source(Source):
                         same=lambda a, b: abs(a - b) < 0.1)
         self.sensor.start()
         self._started = True
+        self._started_at = time.monotonic()
 
     def _apply(self, wanted, read, write, same=lambda a, b: a == b) -> bool:
         """Записать настройку, только если в датчике лежит другая."""
@@ -111,6 +125,7 @@ class Scd41Source(Source):
             return False
 
         env = state.env
+        env.settling = time.monotonic() - self._started_at < self.SETTLE_SECONDS
         env.co2 = measurement.co2
         env.temperature = measurement.temperature
         env.humidity = measurement.humidity

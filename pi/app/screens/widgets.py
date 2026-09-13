@@ -268,16 +268,35 @@ def stat_card(
     caption: str,
     color: Color = theme.FG,
     value_size: int = 34,
+    icon=None,
+    icon_size: float = 20,
 ) -> None:
-    """Карточка «крупное значение + подпись под ним»."""
+    """Карточка «крупное значение + подпись под ним».
+
+    icon — необязательная рисовалка вида icon(draw, x, y, size). Значок
+    встаёт перед подписью, и пара центрируется целиком. Не над значением:
+    там для него нет места, крупное число занимает карточку по ширине.
+    """
     card(draw, box)
     cx = (box[0] + box[2]) / 2
     draw.text((cx, box[1] + 38), value, font=theme.font(value_size, bold=True),
               fill=color, anchor="mm")
+
     caption_font = theme.font(theme.TINY)
-    draw.text((cx, box[3] - 22),
-              ellipsize(draw, caption, box[2] - box[0] - 16, caption_font),
-              font=caption_font, fill=theme.DIM, anchor="mm")
+    room = box[2] - box[0] - 16
+    row = box[3] - 22
+    if icon is None:
+        draw.text((cx, row), ellipsize(draw, caption, room, caption_font),
+                  font=caption_font, fill=theme.DIM, anchor="mm")
+        return
+
+    gap = 5
+    text = ellipsize(draw, caption, room - icon_size - gap, caption_font)
+    span = icon_size + gap + draw.textlength(text, font=caption_font)
+    left = cx - span / 2
+    icon(draw, left, row - icon_size / 2, icon_size)
+    draw.text((left + icon_size + gap, row), text,
+              font=caption_font, fill=theme.DIM, anchor="lm")
 
 
 def fit_font(

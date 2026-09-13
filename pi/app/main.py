@@ -124,6 +124,11 @@ class Recorder:
     def _env_row(self, state: State) -> None:
         if state.env.co2 is None:
             return
+        if state.env.settling:
+            # Первые минуты после запуска датчик завышает температуру.
+            # Показать это на экране не страшно, записать в историю —
+            # страшно: по истории потом ищут аномалии.
+            return
         if self._env_at and state.now - self._env_at < self.ENV_EVERY:
             return
         self.storage.add_env(state.now, state.env.co2,

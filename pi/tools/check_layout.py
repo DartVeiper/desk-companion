@@ -16,6 +16,7 @@ ImageDraw и записываем прямоугольник каждой над
 
 from __future__ import annotations
 
+import copy
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -110,7 +111,15 @@ def states() -> list[tuple[str, State]]:
     broken.health.uptime_seconds = 61
     broken.brightness = 10
 
-    return [("пусто", empty), ("длинные значения", full), ("всё сломано", broken)]
+    # Четвёртое состояние: всё длинное, но музыка не играет. Нужно
+    # потому, что строка под часами — единственная на два жильца: трек и
+    # дата занимают одно место, и проверка с играющей музыкой ветку с
+    # датой не трогает вовсе. Ровно так и проехал наезд даты на дождь.
+    silent = copy.deepcopy(full)
+    silent.pc.track_playing = False
+
+    return [("пусто", empty), ("длинные значения", full),
+            ("длинные значения без музыки", silent), ("всё сломано", broken)]
 
 
 def main() -> None:

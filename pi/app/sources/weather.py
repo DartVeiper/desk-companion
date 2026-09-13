@@ -57,7 +57,7 @@ class WeatherSource(Source):
     def url(self) -> str:
         return (
             f"{API}?latitude={self.latitude}&longitude={self.longitude}"
-            "&current=temperature_2m,weather_code"
+            "&current=temperature_2m,weather_code,is_day"
             "&minutely_15=precipitation&forecast_minutely_15=8&timezone=auto"
         )
 
@@ -67,7 +67,10 @@ class WeatherSource(Source):
 
         current = data["current"]
         state.weather.temp = float(current["temperature_2m"])
-        state.weather.cond = CODES.get(int(current["weather_code"]), "")
+        code = int(current["weather_code"])
+        state.weather.code = code
+        state.weather.cond = CODES.get(code, "")
+        state.weather.is_day = bool(int(current.get("is_day", 1)))
         state.weather.rain_soon_minutes = rain_in_minutes(data.get("minutely_15"))
         self.updated_at = datetime.now()
         return True
