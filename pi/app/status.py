@@ -52,6 +52,15 @@ def snapshot(state: State, sources: list | None = None) -> dict:
         "weather": {"temp": state.weather.temp, "cond": state.weather.cond,
                     "rain_soon_minutes": state.weather.rain_soon_minutes},
         "pc_online": state.pc_online,
+        # Данные игрового ПК: их показывает дашборд, и по ним же видно,
+        # доехал ли агент, — без этого «онлайн» говорит лишь о сердцебиении.
+        "pc": {
+            "active_app": state.pc.active_app, "category": state.pc.category,
+            "keystrokes": state.pc.keystrokes, "mouse_clicks": state.pc.mouse_clicks,
+            "audio_active": state.pc.audio_active, "afk": state.pc.afk,
+            "gpu_temp": state.pc.gpu_temp, "gpu_load": state.pc.gpu_load,
+            "cpu_temp": state.pc.cpu_temp, "cpu_load": state.pc.cpu_load,
+        },
         "health": {
             "wifi_ok": health.wifi_ok, "wifi_ssid": health.wifi_ssid,
             "ip": health.ip, "mqtt_ok": health.mqtt_ok,

@@ -72,6 +72,9 @@ def apply_message(state: State, topic: str, payload: str, now: datetime | None =
         if topic == ACTIVITY:
             pc.keystrokes = int(data.get("keys", 0))
             pc.mouse_clicks = int(data.get("clicks", 0))
+            # Агент шлёт признак отошедшего, экран активности его показывает,
+            # а разбор его молча терял — значок AFK не зажигался никогда.
+            pc.afk = bool(data.get("afk", False))
             return True
 
         if topic == HARDWARE:
