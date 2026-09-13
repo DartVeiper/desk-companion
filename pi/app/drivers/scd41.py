@@ -26,6 +26,7 @@ GET_DATA_READY = 0xE4B8
 SET_ASC = 0x2416
 GET_ASC = 0x2313
 SET_TEMPERATURE_OFFSET = 0x241D
+GET_TEMPERATURE_OFFSET = 0x2318
 PERSIST_SETTINGS = 0x3615
 REINIT = 0x3646
 GET_SERIAL = 0x3682
@@ -164,6 +165,10 @@ class Scd41:
         с референсным термометром в первый день (п.9 плана).
         """
         self.send(SET_TEMPERATURE_OFFSET, int(celsius * 65535 / 175))
+
+    def get_temperature_offset(self) -> float:
+        """Поправка, записанная в самом датчике."""
+        return words(self.query(GET_TEMPERATURE_OFFSET, 3))[0] * 175 / 65535
 
     def persist(self) -> None:
         """Сохранить настройки в энергонезависимую память.

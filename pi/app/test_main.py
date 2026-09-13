@@ -240,6 +240,8 @@ class FakeI2c:
     def __init__(self, co2: int = 700, ready: bool = True) -> None:
         self.written: list[int] = []
         self.co2, self.ready_flag = co2, ready
+        self.asc = True      # заводское значение: самокалибровка включена
+        self.offset = 4.0    # и заводская поправка на нагрев
 
     def write(self, address: int, payload: bytes) -> None:
         self.written.append(int.from_bytes(payload[:2], "big"))
@@ -250,6 +252,14 @@ class FakeI2c:
             return raw + bytes([scd41.crc8(raw)])
 
         if count == 3:
+            # На вопрос о настройке отвечаем настройкой, на остальные —
+            # признаком готовности замера. Различаем по последней команде:
+            # у датчика один канал и на всё один ответ.
+            last = self.written[-1] if self.written else 0
+            if last == scd41.GET_ASC:
+                return word(1 if self.asc else 0)
+            if last == scd41.GET_TEMPERATURE_OFFSET:
+                return word(int(self.offset * 65535 / 175))
             return word(0x8007 if self.ready_flag else 0x8000)
         return word(self.co2) + word(25000) + word(30000)
 
@@ -261,10 +271,24 @@ check("первый опрос применён", env_source.tick(env_state), Tr
 check("CO2 в состоянии", env_state.env.co2, 700)
 # Порядок принципиален: настроечные команды датчик принимает только до
 # start(), в периодическом режиме молча игнорирует.
-check("порядок настройки: стоп, ASC, persist, старт",
-      [hex(c) for c in bus_stub.written[:4]],
-      [hex(scd41.STOP_PERIODIC), hex(scd41.SET_ASC),
+check("порядок настройки: стоп, спросить, записать, сохранить, старт",
+      [hex(c) for c in bus_stub.written[:5]],
+      [hex(scd41.STOP_PERIODIC), hex(scd41.GET_ASC), hex(scd41.SET_ASC),
        hex(scd41.PERSIST_SETTINGS), hex(scd41.START_PERIODIC)])
+check("записали один раз", bus_stub.written.count(scd41.PERSIST_SETTINGS), 1)
+
+# Настройка уже стоит как надо — писать нечего. Это не про лишний вызов:
+# запись в память датчика стоит 800 мс и тратит её ресурс, а сервис
+# перезапускается при каждой доставке кода.
+settled = FakeI2c()
+settled.asc = False
+quiet = Scd41Source(scd41.Scd41(settled.write, settled.read, sleep=lambda _s: None))
+quiet.tick(State(now=datetime(2026, 8, 19, 12, 0)))
+check("настройка на месте — в память не пишем", quiet.persisted, 0)
+check("и команды записи не было",
+      scd41.SET_ASC in settled.written, False)
+check("но измерение всё равно запущено",
+      scd41.START_PERIODIC in settled.written, True)
 
 not_ready = FakeI2c(ready=False)
 lazy = Scd41Source(scd41.Scd41(not_ready.write, not_ready.read, sleep=lambda _s: None))

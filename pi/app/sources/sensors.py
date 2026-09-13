@@ -45,6 +45,9 @@ class Scd41Source(Source):
         self.temperature_offset = temperature_offset
         self._started = False
         self.rejected = 0  # сколько неправдоподобных замеров отброшено
+        #: Сколько раз писали в память датчика. Должно оставаться нулём
+        #: при обычных перезапусках — иначе настройка не сохраняется.
+        self.persisted = 0
         self._last_good = 0.0
 
     def start(self) -> None:
@@ -54,19 +57,42 @@ class Scd41Source(Source):
         start(), в периодическом режиме он их игнорирует. stop() в начале
         нужен на случай, если сервис перезапустился, а датчик остался
         в измерении с прошлого раза.
+
+        Настройки сперва читаются и записываются только если отличаются.
+        Причин две, и обе серьёзные. Запись в энергонезависимую память
+        датчика стоит восемьсот миллисекунд каждая — две штуки добавляли
+        полторы секунды к каждому старту сервиса. А ресурс этой памяти
+        конечен, порядка тысяч циклов: сервис перезапускается при каждой
+        доставке кода, и за один вечер отладки таких перезапусков бывает
+        десяток. Драйвер об этом честно предупреждает в комментарии к
+        persist — и единственный, кто его звал, предупреждение
+        игнорировал.
         """
         self.sensor.stop()
         if self.disable_asc:
             # П.6 плана: в редко проветриваемой комнате самокалибровка
-            # медленно уводит ноль. persist обязателен, иначе настройка
-            # не переживёт отключение питания.
-            self.sensor.set_auto_calibration(False)
-            self.sensor.persist()
+            # медленно уводит ноль.
+            self._apply(False, self.sensor.get_auto_calibration,
+                        self.sensor.set_auto_calibration)
         if self.temperature_offset is not None:
-            self.sensor.set_temperature_offset(self.temperature_offset)
-            self.sensor.persist()
+            self._apply(self.temperature_offset,
+                        self.sensor.get_temperature_offset,
+                        self.sensor.set_temperature_offset,
+                        same=lambda a, b: abs(a - b) < 0.1)
         self.sensor.start()
         self._started = True
+
+    def _apply(self, wanted, read, write, same=lambda a, b: a == b) -> bool:
+        """Записать настройку, только если в датчике лежит другая."""
+        try:
+            if same(wanted, read()):
+                return False
+        except OSError:
+            pass  # не прочиталось — записываем вслепую, это безопаснее
+        write(wanted)
+        self.sensor.persist()
+        self.persisted += 1
+        return True
 
     def poll(self, state: State) -> bool:
         if not self._started:
