@@ -105,15 +105,55 @@ def open_touch(cfg: dict, bus: EventBus, width: int, height: int):
 
 
 def open_radar(cfg: dict):
-    from .sources.sensors import Ld2410Source
+    from .drivers import ld2410
+    from .sources.sensors import PresenceSource
 
     import serial
 
-    port = serial.Serial(cfg["port"], cfg["baud"], timeout=0)
-    source = Ld2410Source(port, engineering=cfg.get("engineering", True))
-    if source.engineering:
-        source.configure()
-    return source
+    port = serial.Serial(cfg["port"], cfg["baud"], timeout=0.2)
+    _configure_radar(port, cfg)
+    return PresenceSource(port, engineering=cfg.get("engineering", True))
+
+
+def _configure_radar(port, cfg: dict) -> None:
+    """Залить в модуль пороги и дальность из конфига.
+
+    Без этого настройки лежали бы в config.toml мёртвым грузом: модуль
+    хранит параметры у себя, и пока их туда не отправить, он работает на
+    заводских — а они нарочно щедрые и видят присутствие в пустой комнате.
+
+    Команды принимаются только внутри «конфигурации», поэтому её открываем
+    и обязательно закрываем: оставленный открытым режим блокирует поток
+    данных, и радар замолкает совсем.
+    """
+    from .drivers import ld2410
+
+    moving = cfg.get("gate_moving")
+    static = cfg.get("gate_static")
+    if not moving and not static and "max_moving_gate" not in cfg:
+        return  # не калибровали — не трогаем, пусть работает на заводских
+
+    def send(frame: bytes) -> None:
+        port.write(frame)
+        port.flush()
+        time.sleep(0.12)
+
+    try:
+        send(ld2410.ENABLE_CONFIG)
+        if "max_moving_gate" in cfg:
+            send(ld2410.set_max_gates(
+                int(cfg["max_moving_gate"]), int(cfg["max_static_gate"]),
+                int(cfg.get("idle_seconds", 30))))
+        if moving and static:
+            for gate, (m, st) in enumerate(zip(moving, static)):
+                send(ld2410.set_gate_sensitivity(gate, int(m), int(st)))
+        if cfg.get("engineering", True):
+            send(ld2410.ENABLE_ENGINEERING)
+    finally:
+        # Закрываем даже при сбое: модуль, оставшийся в конфигурации,
+        # перестаёт слать кадры, и это выглядит как оборванный провод.
+        send(ld2410.END_CONFIG)
+        port.reset_input_buffer()
 
 
 def open_air(cfg: dict):
