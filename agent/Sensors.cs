@@ -279,34 +279,67 @@ public sealed class HardwareMonitor : IDisposable
 
     public bool SensorsAvailable { get; private set; } = true;
 
+    /// <summary>Все найденные датчики — чтобы не угадывать их имена.</summary>
+    public IEnumerable<string> Describe()
+    {
+        _computer.Accept(_visitor);
+        foreach (var hardware in _computer.Hardware)
+        {
+            yield return $"{hardware.HardwareType}  {hardware.Name}";
+            foreach (var sensor in hardware.Sensors)
+            {
+                var value = sensor.Value is { } v ? v.ToString("0.##") : "—";
+                yield return $"    {sensor.SensorType,-12} {sensor.Name,-28} {value}";
+            }
+        }
+    }
+
     public (double? GpuTemp, double? GpuLoad, double? CpuTemp, double? CpuLoad) Read()
     {
         double? gpuTemp = null, gpuLoad = null, cpuTemp = null, cpuLoad = null;
+        var gpuIsDiscrete = false;
+
         try
         {
             _computer.Accept(_visitor);
             foreach (var hardware in _computer.Hardware)
             {
-                var isGpu = hardware.HardwareType is HardwareType.GpuNvidia
-                    or HardwareType.GpuAmd or HardwareType.GpuIntel;
+                var discrete = hardware.HardwareType is HardwareType.GpuNvidia
+                    or HardwareType.GpuAmd;
+                var isGpu = discrete || hardware.HardwareType == HardwareType.GpuIntel;
                 var isCpu = hardware.HardwareType == HardwareType.Cpu;
                 if (!isGpu && !isCpu) continue;
+
+                // На машине с дискретной картой видеоядро процессора тоже
+                // числится видеокартой, и показания встроенного затирали бы
+                // настоящие. Дискретная всегда важнее; встроенную берём,
+                // только если другой нет вовсе.
+                if (isGpu && gpuIsDiscrete && !discrete) continue;
+                if (isGpu && discrete && !gpuIsDiscrete)
+                {
+                    gpuIsDiscrete = true;
+                    gpuTemp = gpuLoad = null;  // сбрасываем показания встроенного
+                }
 
                 foreach (var sensor in hardware.Sensors)
                 {
                     if (sensor.Value is not { } value) continue;
-                    // Имена датчиков различаются между вендорами, поэтому
-                    // берём первый подходящий по типу, а не по названию.
+
                     if (sensor.SensorType == SensorType.Temperature)
                     {
-                        if (isGpu) gpuTemp ??= value;
+                        // У видеокарты нужный датчик так и зовётся — GPU Core.
+                        if (isGpu && sensor.Name.Contains("Core")) gpuTemp = value;
+                        else if (isGpu) gpuTemp ??= value;
                         else if (sensor.Name.Contains("Package") || sensor.Name.Contains("Core"))
                             cpuTemp ??= value;
                     }
-                    else if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Total"))
+                    else if (sensor.SensorType == SensorType.Load)
                     {
-                        if (isGpu) gpuLoad ??= value;
-                        else cpuLoad ??= value;
+                        // Имена различаются: у процессора это «CPU Total», у
+                        // видеокарты «GPU Core». Раньше и там и там искалось
+                        // «Total», и загрузка видеокарты не находилась никогда.
+                        if (isGpu && sensor.Name == "GPU Core") gpuLoad = value;
+                        else if (!isGpu && sensor.Name.Contains("Total")) cpuLoad ??= value;
                     }
                 }
             }
@@ -317,7 +350,7 @@ public sealed class HardwareMonitor : IDisposable
             return (null, null, null, null);
         }
 
-        // Загрузка читается и без прав, а температура — нет. Пустая
+        // Загрузка читается и без прав, а температура — не всегда. Пустая
         // температура при живой загрузке означает именно нехватку прав.
         SensorsAvailable = cpuTemp is not null || gpuTemp is not null;
         return (gpuTemp, gpuLoad, cpuTemp, cpuLoad);

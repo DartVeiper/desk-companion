@@ -43,6 +43,20 @@ internal static class Program
         Console.SetOut(stdout);
         Console.SetError(stderr);
 
+        if (args.Contains("--list-sensors"))
+        {
+            // Режим разведки: печатает всё, что видит LibreHardwareMonitor.
+            // Нужен потому, что имена датчиков различаются между вендорами и
+            // поколениями, и подбирать их вслепую — гарантированный способ
+            // получить пустое поле на чужой машине.
+            using var probe = new HardwareMonitor();
+            foreach (var line in probe.Describe()) Console.WriteLine(line);
+            Console.WriteLine(probe.SensorsAvailable
+                ? "\nтемпературы доступны"
+                : "\nтемператур нет — нужен запуск от администратора");
+            return 0;
+        }
+
         var host = Argument(args, "--host") ?? "deskpi.local";
         var port = int.TryParse(Argument(args, "--port"), out var p) ? p : 1883;
 
