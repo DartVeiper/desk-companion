@@ -60,7 +60,12 @@ public partial class MainWindow : Window
     private readonly System.Collections.ObjectModel.ObservableCollection<ScreenRow> _screens = new();
     private readonly System.Windows.Threading.DispatcherTimer _timer = new();
     private Point _dragStart;
-    private bool _screensDirty;
+
+    private const double VisibleSeconds = 1;
+    private const double HiddenSeconds = 10;
+
+    /// <summary>Куда написать состояние связи — подсказка значка в трее.</summary>
+    public Action<string>? LinkStateChanged;
 
     public MainWindow(Settings settings)
     {
@@ -75,15 +80,27 @@ public partial class MainWindow : Window
         MinimizedBox.IsChecked = settings.StartMinimized;
         ScreenList.ItemsSource = _screens;
 
-        _timer.Interval = TimeSpan.FromSeconds(1);
+        // Опрос идёт всегда, а не с момента показа окна. Раньше таймер
+        // заводился в Loaded, и запущенное в трей приложение не делало
+        // ровно ничего: ноль процессорного времени за шесть минут. А
+        // обещано было обратное — что оно ждёт плату само и подхватит её,
+        // как только та появится в сети.
+        _timer.Interval = TimeSpan.FromSeconds(HiddenSeconds);
         _timer.Tick += (_, _) => Refresh();
-        Loaded += async (_, _) =>
+        _timer.Start();
+        Refresh();
+
+        // Со скрытым окном частить незачем: никто не смотрит, а разница
+        // между «плата появилась» и «мы это заметили» в десять секунд
+        // человеку не видна — он ещё окно открыть не успеет.
+        IsVisibleChanged += (_, _) =>
         {
-            await RefreshScreensAsync();
-            Refresh();
-            _timer.Start();
+            _timer.Interval = TimeSpan.FromSeconds(
+                IsVisible ? VisibleSeconds : HiddenSeconds);
+            if (IsVisible) Refresh();
         };
-        Closing += (_, _) => _timer.Stop();
+
+        Loaded += async (_, _) => await RefreshScreensAsync();
     }
 
     /// <summary>Переключить страницу снаружи — нужно режиму снимка.</summary>
@@ -130,6 +147,7 @@ public partial class MainWindow : Window
             LinkText.Foreground = (Brush)FindResource("Alert");
             LinkDetail.Text = _board.LastError ?? "";
             SubTitle.Text = "жду блок";
+            LinkStateChanged?.Invoke($"Desk Companion — {_board.LastError ?? "нет связи"}");
             return;
         }
 
@@ -138,6 +156,10 @@ public partial class MainWindow : Window
         LinkText.Foreground = (Brush)FindResource("Ok");
         LinkDetail.Text = live.Ip ?? "";
         SubTitle.Text = live.Version ?? "";
+        LinkStateChanged?.Invoke(live.Co2 is null
+            ? "Desk Companion — блок на связи"
+            : $"Desk Companion — CO₂ {live.Co2} ppm, "
+              + (live.Presence ? "за столом" : "никого"));
 
         Co2Value.Text = live.Co2?.ToString() ?? "—";
         Co2Value.Foreground = (Brush)FindResource(
@@ -253,7 +275,6 @@ public partial class MainWindow : Window
         foreach (var entry in screens)
             _screens.Add(new ScreenRow { Key = entry.Key, Label = entry.Label, On = entry.On });
         Renumber();
-        _screensDirty = false;
         SaveScreens.IsEnabled = false;
         ScreensNote.Text = "";
     }
@@ -275,7 +296,6 @@ public partial class MainWindow : Window
                               : _board.LastError ?? "не сохранилось";
         if (ok)
         {
-            _screensDirty = false;
             SaveScreens.IsEnabled = false;
         }
     }
@@ -315,7 +335,6 @@ public partial class MainWindow : Window
 
         _screens.Move(_screens.IndexOf(dragged), _screens.IndexOf(target));
         Renumber();
-        _screensDirty = true;
         SaveScreens.IsEnabled = true;
         ScreensNote.Text = "порядок изменён — нажми «Применить на блоке»";
     }

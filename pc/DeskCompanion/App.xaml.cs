@@ -114,7 +114,6 @@ public partial class App : Application
             Text = "Desk Companion",
         };
         _tray.DoubleClick += (_, _) => ShowWindow();
-
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Открыть", null, (_, _) => ShowWindow());
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -122,6 +121,14 @@ public partial class App : Application
         _tray.ContextMenuStrip = menu;
 
         if (_window is null) return;
+        // Подсказка значка — единственное, что видно, пока окно закрыто.
+        // Ограничение Windows: длиннее 63 знаков просто не покажет.
+        _window.LinkStateChanged = text =>
+        {
+            if (_tray is not null)
+                _tray.Text = text.Length <= 63 ? text : text[..63];
+        };
+
         // Крестик прячет в трей, а не закрывает: приложение должно ждать
         // блок, даже когда окно человеку не нужно. Выход — из меню трея.
         _window.Closing += (_, args) =>
