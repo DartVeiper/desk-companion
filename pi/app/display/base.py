@@ -25,5 +25,14 @@ class Display(ABC):
     def new_frame(self) -> Image.Image:
         return Image.new("RGB", (self.width, self.height), theme.BG)
 
+    def invalidate(self) -> None:
+        """Забыть предыдущий кадр: следующий уйти должен целиком.
+
+        Часть интерфейса, а не особенность SPI: главный цикл просит полную
+        перерисовку периодически, чтобы стереть след разовой помехи на шине.
+        Бэкендам без частичной перерисовки делать нечего — они и так шлют
+        кадр целиком.
+        """
+
     def close(self) -> None:
         pass

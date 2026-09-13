@@ -38,6 +38,17 @@ SAMPLES = 5
 MAX_RESISTANCE = 2000.0
 NO_TOUCH = float("inf")
 
+# Ниже этого z1 касания нет. Замерено на живой панели: в покое z1 держится
+# в пределах 1-6, под нажатием уходит в сотни. Шестнадцать — с запасом выше
+# шума и заметно ниже любого настоящего касания.
+#
+# Проверять именно z1 обязательно. Раньше стояло `z1 <= 0`, и это не
+# срабатывало никогда: ноль панель не отдаёт, она отдаёт единицы. А формула
+# ниже умножает на raw_x, который в покое равен нулю, — и сопротивление
+# выходило нулевым ВСЕГДА. Условие «касание, если ниже порога» выполнялось
+# на каждом опросе: экран листался сам, без единого прикосновения.
+Z1_MIN = 16
+
 
 @dataclass
 class Calibration:
@@ -91,7 +102,7 @@ def to_screen(raw_x: int, raw_y: int, calibration: Calibration,
     )
 
 
-def touch_resistance(z1: int, z2: int, raw_x: int) -> float:
+def touch_resistance(z1: int, z2: int, raw_x: int, z1_min: int = Z1_MIN) -> float:
     """Сопротивление касания по схеме из документации.
 
     Величина обратная силе: жмут сильно — сопротивление мало, отпустили —
@@ -99,8 +110,12 @@ def touch_resistance(z1: int, z2: int, raw_x: int) -> float:
     отбрасывать ложные касания: без неё резистивная панель «нажимается» от
     наводок и от собственного шлейфа, и экран живёт своей жизнью.
     """
-    if z1 <= 0:
-        return NO_TOUCH  # цепь разомкнута — панели никто не касается
+    if z1 < z1_min:
+        return NO_TOUCH  # цепь фактически разомкнута — панели никто не касается
+    if raw_x <= 0:
+        # Формула вырождается: множитель raw_x обнуляет всё выражение, и
+        # «нет касания» превратилось бы в «давят изо всех сил».
+        return NO_TOUCH
     return (z2 / z1 - 1.0) * (raw_x / ADC_MAX) * 1000.0
 
 
@@ -112,10 +127,17 @@ class Xpt2046:
     """
 
     def __init__(self, transfer, calibration: Calibration | None = None,
-                 width: int = 480, height: int = 320) -> None:
+                 width: int = 480, height: int = 320,
+                 max_resistance: float = MAX_RESISTANCE,
+                 z1_min: int = Z1_MIN) -> None:
         self._transfer = transfer
         self.calibration = calibration or Calibration()
         self.width, self.height = width, height
+        # Пороги у каждой панели свои, и раньше они жили только в константах
+        # модуля: значения из config.toml сюда не доходили вовсе, так что
+        # правка конфига не делала ничего. Теперь их задаёт вызывающий.
+        self.max_resistance = max_resistance
+        self.z1_min = z1_min
 
     def _read(self, command: int) -> int:
         # Три байта: команда, затем два байта ответа. Значимых бит 12,
@@ -131,11 +153,12 @@ class Xpt2046:
 
     def resistance(self) -> float:
         raw_x = self._read(CMD_X)
-        return touch_resistance(self._read(CMD_Z1), self._read(CMD_Z2), raw_x)
+        return touch_resistance(self._read(CMD_Z1), self._read(CMD_Z2), raw_x,
+                                self.z1_min)
 
     def position(self) -> tuple[int, int] | None:
         """Координаты касания в пикселях. None — касания нет."""
-        if self.resistance() > MAX_RESISTANCE:
+        if self.resistance() > self.max_resistance:
             return None
         raw_x, raw_y = self.raw()
         return to_screen(raw_x, raw_y, self.calibration, self.width, self.height)

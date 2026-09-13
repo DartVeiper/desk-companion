@@ -43,7 +43,15 @@ from app.db import Database  # noqa: E402
 
 CONFIG = HERE / "config.toml"
 TICK = 0.25          # шаг цикла: достаточно отзывчиво для ввода
+FULL_REFRESH_EVERY = 300.0
 MIN_FRAME_GAP = 0.2  # не чаще, чем успевает SPI на полном кадре
+
+#: Как часто перерисовывать кадр целиком, не спрашивая разницу.
+#: Нужно ради самолечения: частичная перерисовка шлёт только изменившиеся
+#: куски, поэтому одна помеха на шине оставляет полосу висеть до тех пор,
+#: пока содержимое этого места не сменится само. На часах такое место может
+#: не меняться часами. Полный кадр раз в пять минут стирает след любой
+#: разовой помехи и стоит по шине сущие копейки.
 STATUS_EVERY = 1.0   # как часто обновлять снимок для дашборда
 
 
@@ -121,6 +129,7 @@ class Application:
 
         self._running = False
         self._last_frame = 0.0
+        self._last_full = 0.0
         self._last_minute: int | None = None
         #: Откуда брать «сколько держат прямо сейчас». Каждый элемент —
         #: функция, возвращающая миллисекунды. Пусто на машине разработки.
@@ -188,7 +197,13 @@ class Application:
         if self.state.now.minute != self._last_minute:
             self._last_minute, dirty = self.state.now.minute, True
 
-        if not dirty or time.monotonic() - self._last_frame < MIN_FRAME_GAP:
+        now = time.monotonic()
+        if now - self._last_full >= FULL_REFRESH_EVERY:
+            self._last_full = now
+            self.display.invalidate()
+            dirty = True
+
+        if not dirty or now - self._last_frame < MIN_FRAME_GAP:
             return False
         self._render(screen)
         return True

@@ -98,6 +98,8 @@ def open_touch(cfg: dict, bus: EventBus, width: int, height: int):
     panel = xpt2046.Xpt2046(
         lambda payload: bytes(spi.xfer2(list(payload))),
         calibration, width, height,
+        max_resistance=cfg["max_resistance"],
+        z1_min=cfg.get("z1_min", xpt2046.Z1_MIN),
     )
     return TouchSource(panel, GestureRecognizer(bus, width))
 
