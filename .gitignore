@@ -14,3 +14,8 @@ pi/preview/live/
 pi/preview/live.png
 pi/preview/status.json
 pi/.version
+
+# Сборка ПК-агента. Самодостаточный exe весит под 150 МБ — в репозитории
+# ему не место: он полностью воспроизводится из исходников одной командой.
+agent/bin/
+agent/obj/
