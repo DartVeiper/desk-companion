@@ -53,6 +53,12 @@ def cells(state: State) -> list[tuple[str, str, tuple[int, int, int]]]:
     ]
 
 
+#: Ширина нотки и отступ от неё до названия. Вынесены, потому что по ним
+#: считается и доступная ширина текста, и место, куда его ставить.
+NOTE_WIDTH = 9
+GAP = 7
+
+
 class ClockScreen(Screen):
     name = "clock"
     title = "Часы + погода"
@@ -88,13 +94,49 @@ class ClockScreen(Screen):
         draw.text((width / 2, 148), state.now.strftime("%H:%M"),
                   font=theme.font(theme.CLOCK, bold=True), fill=theme.FG, anchor="ms")
 
-        rain = state.weather.rain_soon_minutes
-        subtitle = date_text(state)
-        draw.text((width / 2, 176), subtitle, font=theme.font(theme.SMALL),
-                  fill=theme.DIM, anchor="mm")
-        if rain is not None:
-            draw.text((width - theme.PAD, 176), f"дождь через {rain} мин",
-                      font=theme.font(theme.TINY), fill=theme.ACCENT, anchor="rm")
+        # Пока играет музыка, эта строка показывает трек, а не дату.
+        # Дату видно на других экранах и она за минуту не меняется, а трек
+        # живёт три минуты и меняется сам — на него и смотрят. Остановил
+        # музыку, и дата вернулась. Место одно и то же, поэтому ничего не
+        # прыгает: меняется только содержимое одной полосы.
+        self._subtitle(draw, width, state)
 
         for box, (value, caption, cell_color) in zip(self.card_boxes(width, height), cells(state)):
             w.stat_card(draw, box, value, caption, cell_color)
+
+    @staticmethod
+    def _subtitle(draw: ImageDraw.ImageDraw, width: int, state: State) -> None:
+        """Строка под часами: трек, если играет, иначе дата. Справа — дождь.
+
+        Всё вместе, потому что это одна полоса и они делят её ширину.
+        Раньше правая подпись рисовалась отдельно, и длинное название трека
+        наезжало на неё — обход вёрстки это и поймал.
+        """
+        font = theme.font(theme.SMALL)
+        right = theme.PAD
+
+        rain = state.weather.rain_soon_minutes
+        if rain is not None:
+            warning = f"дождь через {rain} мин"
+            tiny = theme.font(theme.TINY)
+            draw.text((width - theme.PAD, 176), warning, font=tiny,
+                      fill=theme.ACCENT, anchor="rm")
+            right += draw.textlength(warning, font=tiny) + GAP
+
+        track = state.now_playing
+        if not track:
+            # Дата короткая, ей хватает и остатка; центрируем по экрану,
+            # чтобы она не гуляла туда-сюда от появления дождя.
+            draw.text((width / 2, 176), date_text(state), font=font,
+                      fill=theme.DIM, anchor="mm")
+            return
+
+        # Трек центрируем по тому, что осталось, а не по всему экрану:
+        # иначе при длинном названии середина уезжает под правую подпись.
+        left, available = theme.PAD, width - theme.PAD - right
+        text = w.ellipsize(draw, track, available - NOTE_WIDTH - GAP, font)
+        span = NOTE_WIDTH + GAP + draw.textlength(text, font=font)
+        start = left + (available - span) / 2
+        w.note(draw, start, 168, theme.ACCENT)
+        draw.text((start + NOTE_WIDTH + GAP, 176), text, font=font,
+                  fill=theme.FG, anchor="lm")

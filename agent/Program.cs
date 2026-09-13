@@ -20,6 +20,7 @@ internal static class Program
     private const string TopicAudio = "home/pc/audio";
     private const string TopicHeartbeat = "home/pc/heartbeat";
     private const string TopicHardware = "home/pc/hardware";
+    private const string TopicMedia = "home/pc/media";
 
     private static readonly TimeSpan AfkAfter = TimeSpan.FromMinutes(5);
 
@@ -74,6 +75,7 @@ internal static class Program
 
         using var input = new InputCounter();
         using var audio = new AudioMonitor();
+        var media = new NowPlaying();
         using var hardware = new HardwareMonitor();
 
         if (!input.Installed)
@@ -99,6 +101,7 @@ internal static class Program
         var lastHardware = DateTime.MinValue;
         var lastHeartbeat = DateTime.MinValue;
         var lastApp = "";
+        var lastTrack = "";
         var lastAudio = (bool?)null;
         var warnedAboutRights = false;
 
@@ -136,6 +139,20 @@ internal static class Program
                     lastApp = appKey;
                     await Publish(client, TopicActiveApp,
                         JsonSerializer.Serialize(new { app = process, category }), true, stopping.Token);
+                }
+
+                // Трек — на смену, а не по таймеру: песня живёт минуты,
+                // и перепубликовывать её каждую секунду незачем.
+                var track = await media.CurrentAsync();
+                if (track.Key != lastTrack)
+                {
+                    lastTrack = track.Key;
+                    await Publish(client, TopicMedia, JsonSerializer.Serialize(new
+                    {
+                        artist = track.Artist,
+                        title = track.Title,
+                        playing = track.Playing,
+                    }), true, stopping.Token);
                 }
 
                 var playing = audio.IsPlaying();

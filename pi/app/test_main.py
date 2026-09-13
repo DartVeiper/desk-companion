@@ -460,6 +460,39 @@ check("радар без кадров сначала не жалуется", sil
 silent._last_frame_at = time.monotonic() - Ld2410Source.STALE_AFTER - 1
 check("десять секунд тишины — это отказ", silent.healthy, False)
 
+# Текущий трек. Топик приходит с признаком «сохранять», чтобы после
+# перезапуска блока музыка появилась сразу, не дожидаясь следующей песни.
+# Обратная сторона — то же сообщение переживает и смерть агента.
+
+media_state = State(now=datetime(2026, 8, 19, 12, 0))
+media_state.pc.last_heartbeat = media_state.now
+check("трек разобран",
+      mqtt.apply_message(media_state, mqtt.MEDIA,
+                         '{"artist": "Kai Angel", "title": "andy warhol", '
+                         '"playing": true}'),
+      True)
+check("собран одной строкой", media_state.now_playing, "Kai Angel — andy warhol")
+check("тот же трек второй раз ничего не меняет",
+      mqtt.apply_message(media_state, mqtt.MEDIA,
+                         '{"artist": "Kai Angel", "title": "andy warhol", '
+                         '"playing": true}'),
+      False)
+
+mqtt.apply_message(media_state, mqtt.MEDIA, '{"title": "только название", "playing": true}')
+check("без исполнителя — одно название", media_state.now_playing, "только название")
+
+mqtt.apply_message(media_state, mqtt.MEDIA,
+                   '{"artist": "Kai Angel", "title": "andy warhol", "playing": false}')
+check("на паузе не показываем", media_state.now_playing, "")
+
+mqtt.apply_message(media_state, mqtt.MEDIA,
+                   '{"artist": "Kai Angel", "title": "andy warhol", "playing": true}')
+media_state.pc.last_heartbeat = media_state.now - timedelta(minutes=10)
+check("ПК пропал — трек тоже", media_state.now_playing, "")
+
+check("мусор в топике не роняет",
+      mqtt.apply_message(media_state, mqtt.MEDIA, "не json"), False)
+
 print("\nИсточник тача")
 
 

@@ -202,6 +202,24 @@ def card(draw: ImageDraw.ImageDraw, box: Box, fill: Color | None = None) -> None
     draw.rounded_rectangle(box, radius=14, fill=fill or theme.SURFACE)
 
 
+def note(draw: ImageDraw.ImageDraw, x: float, y: float, color, height: float = 13) -> float:
+    """Нотка из примитивов. Возвращает свою ширину.
+
+    Рисуем, а не берём символ из шрифта. Проверено: ♪ в Nunito нет, и
+    Pillow подставляет вместо него пустой квадратик «глифа не найдено».
+    Причём молча — отпечаток непустой, вёрстка сходится, тесты проходят, и
+    увидеть подмену можно только глазами на живом экране.
+    """
+    width = height * 0.62
+    stem = max(1.5, height * 0.11)
+    head = height * 0.42
+    # Головка внизу, палочка справа вверх — как у восьмой ноты.
+    draw.ellipse((x, y + height - head, x + head * 1.25, y + height), fill=color)
+    draw.rectangle((x + head * 1.25 - stem, y, x + head * 1.25, y + height - head * 0.45),
+                   fill=color)
+    return width
+
+
 def ellipsize(draw: ImageDraw.ImageDraw, text: str, max_width: float, font) -> str:
     """Обрезать по ширине, поставив многоточие.
 

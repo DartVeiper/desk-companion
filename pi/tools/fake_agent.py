@@ -27,6 +27,16 @@ AUDIO = "home/pc/audio"
 HEARTBEAT = "home/pc/heartbeat"
 HARDWARE = "home/pc/hardware"
 ANOMALY = "home/pc/anomaly"
+MEDIA = "home/pc/media"
+
+#: Треки для проверки строки под часами. Нарочно разной длины: короткое
+#: название и длинное ложатся по-разному, а ломается именно длинное.
+TRACKS = [
+    ("Kai Angel", "andy warhol"),
+    ("Оркестр имени Владимира Спивакова",
+     "Симфония №7 до мажор, часть III — Allegro molto vivace"),
+    ("", "Без исполнителя"),
+]
 
 SCENARIOS = {
     "work": [("Code.exe", "code"), ("chrome.exe", "browser"), ("Code.exe", "code")],
@@ -84,6 +94,16 @@ def main() -> None:
                 "afk": args.afk,
             })
             send(AUDIO, "0" if args.afk else "1")
+
+        if tick % 8 == 0:
+            # Каждый третий раз — тишина: строка под часами обязана
+            # вернуться к дате, и проверять это надо тем же прогоном.
+            index = (tick // 8) % (len(TRACKS) + 1)
+            if index < len(TRACKS):
+                artist, title = TRACKS[index]
+                send(MEDIA, {"artist": artist, "title": title, "playing": True})
+            else:
+                send(MEDIA, {"artist": "", "title": "", "playing": False})
 
         if tick % 2 == 0:
             wave = (math.sin(elapsed / 7) + 1) / 2

@@ -62,6 +62,21 @@ class Pc:
     anomaly_flag: bool = False
     anomaly_reason: str = ""
     last_heartbeat: datetime | None = None
+    #: Что звучит на ПК. Пустое название — не играет ничего.
+    #: В базу это не пишется намеренно: минутные агрегаты и так дают
+    #: картину дня, а строка на каждую песню утопила бы их шумом.
+    track_artist: str = ""
+    track_title: str = ""
+    track_playing: bool = False
+
+    @property
+    def track(self) -> str:
+        """Одной строкой: «исполнитель — название»."""
+        if not self.track_playing or not self.track_title:
+            return ""
+        if not self.track_artist:
+            return self.track_title
+        return f"{self.track_artist} — {self.track_title}"
 
 
 @dataclass
@@ -107,6 +122,18 @@ class State:
     def pc_online(self) -> bool:
         hb = self.pc.last_heartbeat
         return hb is not None and (self.now - hb) < HEARTBEAT_TIMEOUT
+
+    @property
+    def now_playing(self) -> str:
+        """Что звучит — но только пока ПК на связи.
+
+        Проверка обязательна из-за того, как устроен MQTT: агент шлёт трек
+        с признаком «сохранять», чтобы после перезапуска блока музыка
+        появилась сразу, не дожидаясь следующей песни. Обратная сторона в
+        том, что это же сообщение переживает и смерть агента: выключенный
+        ПК оставил бы на часах песню, которая доиграла вчера.
+        """
+        return self.pc.track if self.pc_online else ""
 
     def problems(self) -> list[tuple[str, str, bool]]:
         """Неисправности блока: (метка, подробности, критично). Важное первым.

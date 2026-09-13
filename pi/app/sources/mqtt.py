@@ -26,8 +26,9 @@ AUDIO = "home/pc/audio"
 HEARTBEAT = "home/pc/heartbeat"
 HARDWARE = "home/pc/hardware"
 ANOMALY = "home/pc/anomaly"
+MEDIA = "home/pc/media"
 
-SUBSCRIPTIONS = (ACTIVE_APP, ACTIVITY, AUDIO, HEARTBEAT, HARDWARE, ANOMALY)
+SUBSCRIPTIONS = (ACTIVE_APP, ACTIVITY, AUDIO, HEARTBEAT, HARDWARE, ANOMALY, MEDIA)
 
 # Топики, которые публикует сам Pi. С retain — чтобы после перезапуска
 # сервиса подписчик сразу получал последнее известное значение, а не пустоту.
@@ -81,6 +82,16 @@ def apply_message(state: State, topic: str, payload: str, now: datetime | None =
             for field in ("gpu_temp", "gpu_load", "cpu_temp", "cpu_load"):
                 value = data.get(field)
                 setattr(pc, field, None if value is None else float(value))
+            return True
+
+        if topic == MEDIA:
+            artist = str(data.get("artist", ""))
+            title = str(data.get("title", ""))
+            playing = bool(data.get("playing", False))
+            if (artist, title, playing) == (pc.track_artist, pc.track_title,
+                                            pc.track_playing):
+                return False
+            pc.track_artist, pc.track_title, pc.track_playing = artist, title, playing
             return True
 
         if topic == ANOMALY:

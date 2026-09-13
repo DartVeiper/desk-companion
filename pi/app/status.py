@@ -61,6 +61,7 @@ def snapshot(state: State, sources: list | None = None,
             "audio_active": state.pc.audio_active, "afk": state.pc.afk,
             "gpu_temp": state.pc.gpu_temp, "gpu_load": state.pc.gpu_load,
             "cpu_temp": state.pc.cpu_temp, "cpu_load": state.pc.cpu_load,
+            "track": state.now_playing,
         },
         "health": {
             "wifi_ok": health.wifi_ok, "wifi_ssid": health.wifi_ssid,

@@ -81,6 +81,12 @@ def states() -> list[tuple[str, State]]:
     full.pc.cpu_temp, full.pc.gpu_temp = 88.4, 91.2
     full.pc.anomaly_flag = True
     full.pc.anomaly_reason = "необычно длинная сессия без перерывов, уже 4 ч 12 мин"
+    # Название трека приходит из чужого плеера, и его длину мы не
+    # выбираем: у живых релизов бывает и такое.
+    full.pc.track_artist = "Оркестр имени Владимира Спивакова"
+    full.pc.track_title = ("Симфония №7 до мажор, часть III — "
+                           "Allegro molto vivace (концертная запись)")
+    full.pc.track_playing = True
     full.desk.manual_status = "не беспокоить"
     full.desk.manual_until = now + timedelta(hours=4, minutes=37)
     full.desk.streak_days = 128

@@ -7,7 +7,13 @@
          ручной и всегда из терминала. Прятать окно потом умеет Планировщик
          задач: там это галочка «Свернуть», а не свойство сборки. -->
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Версия Windows в цели нужна ради списка проигрываемого: он живёт
+         в API самой системы, и без указания версии компилятор о нём не
+         знает. Пакетов при этом не добавляется — проекция идёт с SDK. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <!-- Совместимость с более старыми Windows заявляем отдельно: цель
+         говорит «знаю про API десятки», а не «требую её». -->
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DeskAgent</AssemblyName>
