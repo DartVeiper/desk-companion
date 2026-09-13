@@ -25,10 +25,23 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
-        // Консоль Windows по умолчанию не в UTF-8, и весь русский вывод
-        // агента превращается в крякозябры — включая подсказки, ради которых
-        // он и печатается.
-        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+        // Русский вывод и буферизация. Двух строк тут мало, нужны обе:
+        //
+        // OutputEncoding переключает кодовую страницу самого окна консоли —
+        // без этого текст в окне превращается в крякозябры.
+        //
+        // SetOut нужен отдельно, потому что при перенаправлении в файл или в
+        // конвейер окна нет вовсе, и кодировку приходится задавать самому
+        // потоку. AutoFlush там же: без него последние строки остаются в
+        // буфере и пропадают, если агента закрыли — а закрывают его как раз
+        // тогда, когда эти строки и надо прочитать.
+        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }
+        var stdout = new StreamWriter(Console.OpenStandardOutput(),
+                                      new System.Text.UTF8Encoding(false)) { AutoFlush = true };
+        var stderr = new StreamWriter(Console.OpenStandardError(),
+                                      new System.Text.UTF8Encoding(false)) { AutoFlush = true };
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
 
         var host = Argument(args, "--host") ?? "deskpi.local";
         var port = int.TryParse(Argument(args, "--port"), out var p) ? p : 1883;

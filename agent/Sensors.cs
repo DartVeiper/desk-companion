@@ -75,6 +75,35 @@ public sealed class InputCounter : IDisposable
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string? name);
 
+    private const uint WM_QUIT = 0x0012;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public IntPtr Hwnd;
+        public uint Message;
+        public IntPtr WParam;
+        public IntPtr LParam;
+        public uint Time;
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax);
+
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage(ref MSG message);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref MSG message);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostThreadMessage(uint threadId, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
     // Ссылки на делегаты держим полями: если их соберёт сборщик мусора,
     // Windows позовёт освобождённую память и процесс упадёт. Это классическая
     // ошибка при работе с хуками, и проявляется она не сразу.
@@ -85,13 +114,52 @@ public sealed class InputCounter : IDisposable
     private long _keys, _clicks;
     private DateTime _lastInput = DateTime.UtcNow;
 
+    // Хуки живут на своём потоке, и у этого потока есть цикл разбора
+    // сообщений. Причина важная. Низкоуровневые хуки Windows доставляет
+    // через очередь сообщений потока, который их поставил. Если очередь
+    // никто не разбирает, система на КАЖДОМ событии ввода ждёт таймаут
+    // (по умолчанию 300 мс) и только потом пропускает его дальше.
+    //
+    // Раньше хуки ставились на главном потоке, а он уходил в асинхронный
+    // цикл без разбора сообщений — и весь ввод в системе начинал тормозить:
+    // мышь двигалась рывками, курсор шёл кадра по три в секунду. Выглядело
+    // как «агент повесил компьютер», и по сути так и было.
+    private Thread? _pump;
+    private uint _pumpThread;
+    private readonly ManualResetEventSlim _ready = new(false);
+
     public InputCounter()
     {
         _keyboardProc = KeyboardCallback;
         _mouseProc = MouseCallback;
+
+        _pump = new Thread(PumpLoop)
+        {
+            IsBackground = true,
+            Name = "desk-agent-input-hooks",
+        };
+        _pump.Start();
+        _ready.Wait(TimeSpan.FromSeconds(5));
+    }
+
+    private void PumpLoop()
+    {
+        _pumpThread = GetCurrentThreadId();
         var module = GetModuleHandle(null);
         _keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, _keyboardProc, module, 0);
         _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseProc, module, 0);
+        _ready.Set();
+
+        // Сам цикл ничего не делает: он нужен, чтобы очередь сообщений
+        // разбиралась и Windows не ждала таймаут на каждом событии.
+        while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
+        {
+            TranslateMessage(ref message);
+            DispatchMessage(ref message);
+        }
+
+        if (_keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(_keyboardHook); _keyboardHook = IntPtr.Zero; }
+        if (_mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
     }
 
     public bool Installed => _keyboardHook != IntPtr.Zero && _mouseHook != IntPtr.Zero;
@@ -129,8 +197,15 @@ public sealed class InputCounter : IDisposable
 
     public void Dispose()
     {
-        if (_keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(_keyboardHook); _keyboardHook = IntPtr.Zero; }
-        if (_mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
+        // Снимать хуки обязан тот же поток, что их ставил, поэтому просим
+        // цикл завершиться, а он снимет их сам на выходе.
+        if (_pumpThread != 0)
+        {
+            PostThreadMessage(_pumpThread, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+            _pump?.Join(TimeSpan.FromSeconds(2));
+            _pumpThread = 0;
+        }
+        _ready.Dispose();
     }
 }
 
