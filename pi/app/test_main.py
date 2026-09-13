@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -388,6 +389,52 @@ problems = hardware._configure_radar(half_deaf, {"engineering": True})
 check("о непринятой команде сказано", len(problems) > 0, True)
 check("настройка закрыта даже при сбое",
       word_of(half_deaf.commands[-1]), 0x00FE)
+
+# Молчаливый отказ. Самый неприятный вид поломки: датчик отвечает по шине,
+# но говорит чушь. Исключения нет, ok остаётся True, и экран часами держит
+# последнее живое значение, уверяя, что всё в порядке. Именно так SCD41 и
+# ведёт себя после сбоя питания.
+
+
+class DeadSensor:
+    """SCD41, который принимает команды и отдаёт нули."""
+
+    def stop(self):
+        pass
+
+    def start(self):
+        pass
+
+    def set_auto_calibration(self, enabled):
+        pass
+
+    def set_temperature_offset(self, value):
+        pass
+
+    def persist(self):
+        pass
+
+    def ready(self):
+        return True
+
+    def read(self):
+        return scd41.Measurement(co2=0, temperature=0.0, humidity=0.0)
+
+
+dead = Scd41Source(DeadSensor(), disable_asc=False)
+dead_state = State(now=datetime(2026, 8, 19, 12, 0))
+check("нули не попадают в состояние", dead.tick(dead_state), False)
+check("прежнее значение не испорчено", dead_state.env.co2, None)
+check("пока прогревается, не жалуемся", dead.healthy, True)
+dead._last_good = time.monotonic() - Scd41Source.STALE_AFTER - 1
+check("минута нулей — это отказ", dead.healthy, False)
+check("при этом исключения не было", dead.ok, True)
+
+silent = Ld2410Source(FakePort(b""))
+silent.tick(State(now=datetime(2026, 8, 19, 12, 0)))
+check("радар без кадров сначала не жалуется", silent.healthy, True)
+silent._last_frame_at = time.monotonic() - Ld2410Source.STALE_AFTER - 1
+check("десять секунд тишины — это отказ", silent.healthy, False)
 
 print("\nИсточник тача")
 

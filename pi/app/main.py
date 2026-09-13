@@ -346,9 +346,9 @@ class Application:
             self.state.health.input_rejected = self.encoder.rotary.rejected
         for source in self.sources:
             if source.name.startswith("env"):
-                self.state.health.scd41_ok = source.ok
+                self.state.health.scd41_ok = source.healthy
             elif source.name.startswith("presence"):
-                self.state.health.ld2410_ok = source.ok
+                self.state.health.ld2410_ok = source.healthy
 
     # --------------------------------------------------------------- цикл
 

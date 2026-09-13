@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DeskCompanion</AssemblyName>
+    <RootNamespace>DeskCompanion</RootNamespace>
+    <ApplicationIcon></ApplicationIcon>
+    <!-- Один файл при публикации: ставить приложение из десятка dll неудобно,
+         а самораспаковка стоит полсекунды при первом запуске. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms тянет свои глобальные using, и половина имён начинает
+         спорить с WPF: Application, Point, MouseEventArgs есть и там и там.
+         Убираем их: из WinForms нам нужен ровно значок в трее, и он
+         прекрасно берётся по полному имени. -->
+    <Using Remove="System.Windows.Forms"/>
+    <Using Remove="System.Drawing"/>
+  </ItemGroup>
+
+  <!-- WindowsForms нужен ровно ради значка в трее: у WPF своего нет, а
+       городить его через Shell_NotifyIcon вручную — полдня работы ради
+       того, что уже написано. Окна WinForms при этом не создаются. -->
+
+</Project>

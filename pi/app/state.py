@@ -127,7 +127,9 @@ class State:
         if not h.mqtt_ok:
             found.append(("нет брокера", "mosquitto не отвечает — ПК-агент не достучится", True))
         if not h.scd41_ok:
-            found.append(("нет CO2", "SCD41 молчит по I2C", False))
+            found.append(("нет CO2",
+                          "датчик воздуха замолчал — снять питание с платы "
+                          "физически, перезагрузка не помогает", False))
         if not h.ld2410_ok:
             found.append(("нет радара", "LD2410 молчит по UART — присутствие не определяется", False))
         if h.disk_free_pct < 10:

@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import time
+
 from ..drivers import ld2410, scd41
 from ..state import State
 from .base import Source
@@ -21,6 +23,11 @@ class Scd41Source(Source):
     Опрашивать чаще, чем раз в 5 секунд, бессмысленно: датчик обновляет
     показания именно с таким периодом.
     """
+
+    #: Через сколько молчания считать датчик неисправным. Он обновляется
+    #: раз в пять секунд, так что минута без единого правдоподобного замера
+    #: — это уже не «не успел», а отказ.
+    STALE_AFTER = 60.0
 
     name = "env"
     #: Датчик обновляет показания раз в пять секунд, но фазу его цикла мы
@@ -38,6 +45,7 @@ class Scd41Source(Source):
         self.temperature_offset = temperature_offset
         self._started = False
         self.rejected = 0  # сколько неправдоподобных замеров отброшено
+        self._last_good = 0.0
 
     def start(self) -> None:
         """Настроить и запустить измерения.
@@ -78,7 +86,23 @@ class Scd41Source(Source):
         env.temperature = measurement.temperature
         env.humidity = measurement.humidity
         env.updated = state.now
+        self._last_good = time.monotonic()
         return True
+
+    @property
+    def healthy(self) -> bool:
+        """Датчик отвечает и говорит правдоподобное.
+
+        Отдельно от ok, потому что самый неприятный отказ SCD41 выглядит
+        как исправность: после сбоя питания он подтверждает команды по I2C
+        и возвращает нули. Исключения нет, ok остаётся True, а на экране
+        часами висит последнее живое значение.
+        """
+        if not self.ok:
+            return False
+        if not self._last_good:
+            return True  # ещё не прогрелся, первые замеры законно пустые
+        return time.monotonic() - self._last_good < self.STALE_AFTER
 
     def close(self) -> None:
         if self._started:
@@ -96,6 +120,10 @@ class Ld2410Source(Source):
     """
 
     name = "presence"
+    #: Через сколько тишины считать модуль замолчавшим. Кадры идут десять
+    #: раз в секунду, так что десять секунд тишины — это отказ.
+    STALE_AFTER = 10.0
+
     #: Модуль шлёт кадры десять раз в секунду. Опрашиваем вдвое чаще:
     #: при совпадении периодов опрос и кадр расходятся по фазе, и половину
     #: времени свежий кадр ждал бы следующего круга. Пустой опрос теперь
@@ -112,6 +140,7 @@ class Ld2410Source(Source):
         self.last_report: ld2410.Report | None = None
         self.frames = 0
         self.undecoded = 0
+        self._last_frame_at = 0.0
         #: Что не удалось настроить при подъёме. Заполняет hardware.py —
         #: он владеет портом до того, как источник начнёт его читать.
         self.setup_problems: list[str] = []
@@ -147,6 +176,7 @@ class Ld2410Source(Source):
             return False
 
         self.last_report = report
+        self._last_frame_at = time.monotonic()
         if report.present == state.desk.presence:
             return False
 
@@ -155,6 +185,16 @@ class Ld2410Source(Source):
         state.desk.presence = report.present
         state.desk.presence_since = state.now
         return True
+
+    @property
+    def healthy(self) -> bool:
+        """Кадры идут. Модуль умеет замолкать, оставаясь подключённым:
+        например, если его оставили в режиме конфигурации."""
+        if not self.ok:
+            return False
+        if not self._last_frame_at:
+            return True
+        return time.monotonic() - self._last_frame_at < self.STALE_AFTER
 
     def close(self) -> None:
         try:
