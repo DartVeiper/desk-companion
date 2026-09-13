@@ -23,7 +23,7 @@ class WeatherDetail(DetailScreen):
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         width, height = frame.size
         out = state.weather
-        w.header(draw, width, "Погода за окном", BACK_HINT, theme.ACCENT)
+        w.header(draw, width, "Погода за окном", dot=theme.ACCENT, home=True)
 
         if out.temp is None:
             w.empty_state(draw, width, height, "Нет данных",
@@ -63,7 +63,7 @@ class AirDetail(DetailScreen):
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         width, height = frame.size
         env = state.env
-        w.header(draw, width, "Воздух в комнате", BACK_HINT, theme.co2_color(env.co2))
+        w.header(draw, width, "Воздух в комнате", dot=theme.co2_color(env.co2), home=True)
 
         if env.co2 is None:
             w.empty_state(draw, width, height, "Датчик молчит",

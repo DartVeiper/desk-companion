@@ -214,6 +214,15 @@ class Director:
         screen = self._stack[-1] if self._stack else self.registry.current
         x, y = event.x or 0, event.y or 0
 
+        home = screen.home_zone(theme.WIDTH, theme.HEIGHT)
+        if home is not None and home[0] <= x <= home[2] and home[1] <= y <= home[3]:
+            # Не «на шаг назад», а сразу на первый экран. Из глубины в два
+            # слоя выбираться по одному нажатию — это и есть та
+            # потерянность, ради которой кнопку и добавили.
+            self.close_overlays()
+            self.registry.home()
+            return None
+
         for detail_name, (x0, y0, x1, y1) in screen.hit_zones(theme.WIDTH, theme.HEIGHT).items():
             if x0 <= x <= x1 and y0 <= y <= y1:
                 target = next((d for d in screen.details if d.name == detail_name), None)

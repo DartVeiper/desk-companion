@@ -37,7 +37,7 @@ class BrightnessScreen(DetailScreen):
 
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         width, height = frame.size
-        w.header(draw, width, self.title, BACK_HINT, theme.ACCENT)
+        w.header(draw, width, self.title, dot=theme.ACCENT, home=True)
 
         draw.text((width / 2, 150), f"{state.brightness}%",
                   font=theme.font(88, weight=theme.EXTRABOLD), fill=theme.FG, anchor="ms")
@@ -63,8 +63,8 @@ class DiagnosticsScreen(DetailScreen):
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         width, height = frame.size
         h = state.health
-        w.header(draw, width, self.title, BACK_HINT,
-                 theme.ALERT if state.problems() else theme.OK)
+        w.header(draw, width, self.title,
+                 dot=theme.ALERT if state.problems() else theme.OK, home=True)
 
         rows = [
             ("WiFi", h.wifi_ssid or "нет сети", h.wifi_ok),
@@ -114,6 +114,9 @@ class SettingsScreen(Screen):
         self.details = [BrightnessScreen(), DiagnosticsScreen()]
         self._index = 0
 
+    def home_zone(self, width: int, height: int):
+        return w.home_box(width)
+
     @property
     def _items(self) -> list[tuple[str | None, str]]:
         return [(d.name, d.title) for d in self.details] + [(None, "Выйти")]
@@ -137,7 +140,7 @@ class SettingsScreen(Screen):
 
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         width, height = frame.size
-        w.header(draw, width, self.title, "остальное — в браузере", theme.ACCENT, state=state)
+        w.header(draw, width, self.title, dot=theme.ACCENT, home=True)
 
         items = self._items
         top, gap = 74, 10

@@ -32,6 +32,10 @@ class Screen(ABC):
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         """Нарисовать себя на кадре."""
 
+    def home_zone(self, width: int, height: int) -> Box | None:
+        """Зона кнопки «домой», если экран её рисует. None — не рисует."""
+        return None
+
     def hit_zones(self, width: int, height: int) -> dict[str, Box]:
         """Области, реагирующие на тап: имя экрана подробностей -> прямоугольник.
 
@@ -50,4 +54,13 @@ class Screen(ABC):
 
 
 class DetailScreen(Screen):
-    """Подробности поверх режима. В карусель не входит."""
+    """Подробности поверх режима. В карусель не входит.
+
+    У всех накладок есть кнопка возврата в правом верхнем углу: сюда
+    заходят «вглубь», и выход должен быть виден, а не угадываться.
+    """
+
+    def home_zone(self, width: int, height: int) -> Box | None:
+        from . import widgets
+
+        return widgets.home_box(width)

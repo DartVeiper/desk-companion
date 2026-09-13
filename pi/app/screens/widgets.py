@@ -42,6 +42,41 @@ def status_badge(draw: ImageDraw.ImageDraw, width: int, state) -> float:
     return text_w + 22
 
 
+#: Сторона кнопки «домой». Размер под палец, а не под курсор: 44 точки —
+#: примерно ширина подушечки, и меньше делать нельзя, иначе мимо попадают
+#: чаще, чем в цель.
+HOME_SIZE = 44
+
+
+def home_box(width: int) -> Box:
+    """Где находится кнопка «домой».
+
+    Отдельной функцией, потому что её должны знать двое: отрисовка и
+    разбор тапа. Разъехавшись, они дали бы кнопку, которая видна, но не
+    нажимается — и искать такое пришлось бы долго.
+    """
+    return (float(width - theme.PAD - HOME_SIZE), 10.0,
+            float(width - theme.PAD), 10.0 + HOME_SIZE)
+
+
+def home_button(draw: ImageDraw.ImageDraw, width: int) -> Box:
+    """Стрелка возврата на первый экран.
+
+    Рисуется только на накладках: из карусели выходить некуда, а лишняя
+    кнопка на каждом экране съедала бы и место, и внимание.
+    """
+    box = home_box(width)
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+    draw.rounded_rectangle(box, radius=10, fill=theme.SURFACE)
+    # Стрелку рисуем линиями, а не символом из шрифта: в Nunito стрелок
+    # нет, и вместо неё встал бы квадрат.
+    draw.line((cx - 8, cy, cx + 9, cy), fill=theme.ACCENT, width=3)
+    draw.line((cx - 8, cy, cx - 1, cy - 7), fill=theme.ACCENT, width=3)
+    draw.line((cx - 8, cy, cx - 1, cy + 7), fill=theme.ACCENT, width=3)
+    return box
+
+
 def header(
     draw: ImageDraw.ImageDraw,
     width: int,
@@ -49,6 +84,7 @@ def header(
     right: str | None = None,
     dot: Color | None = None,
     state=None,
+    home: bool = False,
 ) -> None:
     """Верхняя строка: название режима слева, статус справа.
 
@@ -60,6 +96,13 @@ def header(
         draw.ellipse((x, 27, x + 10, 37), fill=dot)
         x += 20
     draw.text((x, 32), title, font=theme.font(theme.SMALL, bold=True), fill=theme.FG, anchor="lm")
+
+    if home:
+        # Кнопка занимает правый угол целиком, поэтому подпись и значок
+        # неисправности туда уже не помещаются — и не нужны: на накладке
+        # смотрят на содержимое, а не на состояние блока.
+        home_button(draw, width)
+        return
 
     taken = status_badge(draw, width, state) if state is not None else 0.0
     if right:

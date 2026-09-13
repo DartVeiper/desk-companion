@@ -155,6 +155,32 @@ press(d, s, Action.SETTINGS)
 d.close_overlays()
 check("настройки закрываются снаружи", d.in_overlay, False)
 
+print("\nКнопка «домой» на накладках")
+from app.screens import widgets as _w
+_hx = (_w.home_box(480)[0] + _w.home_box(480)[2]) / 2
+_hy = (_w.home_box(480)[1] + _w.home_box(480)[3]) / 2
+
+d, s = make()
+press(d, s, Action.NEXT)          # ушли с первого экрана на второй
+press(d, s, Action.SETTINGS)      # и открыли поверх накладку
+check("зашли вглубь", d.in_overlay, True)
+tap(d, s, int(_hx), int(_hy))
+check("тап по стрелке закрыл накладку", d.in_overlay, False)
+check("и вернул на первый экран, а не на второй", d.current(s).name, "clock")
+
+# Из двух слоёв вглубь — тоже одним нажатием, ради этого кнопка и нужна.
+d, s = make()
+press(d, s, Action.SETTINGS)
+press(d, s, Action.SELECT)
+check("два слоя накладок", len(d.overlay_names), 2)
+tap(d, s, int(_hx), int(_hy))
+check("одна стрелка выводит из глубины", d.in_overlay, False)
+
+# А на экранах карусели кнопки нет: выходить оттуда некуда.
+d, s = make()
+check("у режима карусели зоны нет",
+      d.current(s).home_zone(480, 320), None)
+
 print("\nРучной статус недостижим вращением — иначе из него не выйти")
 d, s = make()
 seen = set()

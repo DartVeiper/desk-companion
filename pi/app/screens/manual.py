@@ -38,6 +38,10 @@ class ManualScreen(Screen):
     def __init__(self) -> None:
         self._index = 0
 
+    # Кнопки «домой» здесь намеренно нет. В правом углу живёт обратный
+    # отсчёт до автосброса, а он тут важнее: именно он объясняет, почему
+    # статус однажды пропадёт сам. Выход с этого экрана и так очевиден —
+    # выбор статуса закрывает его, а любое другое действие уводит наверх.
     def handle(self, action: Action, state: State) -> bool:
         if action is Action.NEXT:
             self._index = (self._index + 1) % len(OPTIONS)
