@@ -160,8 +160,13 @@ class AnomalyModel:
     """IsolationForest поверх окон.
 
     sklearn импортируется внутри: на Pi он ставится отдельно, а весь код
-    выше должен оставаться работоспособным и без него.
+    выше должен оставаться работоспособным и без него. Отсутствие библиотеки
+    для нас не ошибка, а штатное состояние — до накопления данных Режим 6
+    всё равно молчит, и ставить двести мегабайт заранее незачем.
     """
+
+    #: Почему обучение не состоялось. Пусто — состоялось.
+    unavailable_reason: str = ""
 
     def __init__(self, contamination: float = CONTAMINATION) -> None:
         self.contamination = contamination
@@ -172,8 +177,21 @@ class AnomalyModel:
 
     def fit(self, windows: list[Window]) -> bool:
         if len(windows) < MIN_SAMPLES:
+            self.unavailable_reason = (
+                f"мало данных: {len(windows)} окон из {MIN_SAMPLES}")
             return False
-        from sklearn.ensemble import IsolationForest
+
+        try:
+            from sklearn.ensemble import IsolationForest
+        except ImportError:
+            # Ровно то, что обещано выше: без библиотеки отказываем, а не
+            # роняем. Раньше здесь вылетало наружу, и сервис на плате без
+            # scikit-learn упал бы в тот день, когда данных наконец хватит.
+            self.unavailable_reason = (
+                "scikit-learn не установлен: sudo bash setup-step2.sh --with-ml")
+            return False
+
+        self.unavailable_reason = ""
 
         self.model = IsolationForest(
             contamination=self.contamination,

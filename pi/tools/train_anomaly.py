@@ -59,7 +59,9 @@ def main() -> None:
         print("  модель обучится, но выводы будут шаткими.\n")
 
     model = AnomalyModel(contamination=args.contamination)
-    model.fit(windows)
+    if not model.fit(windows):
+        print(f"  обучение не состоялось — {model.unavailable_reason}")
+        raise SystemExit(1)
 
     flagged = [(w, model.score(w)[1]) for w in windows if model.score(w)[0]]
     print(f"  помечено: {len(flagged)} окон "

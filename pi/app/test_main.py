@@ -469,19 +469,38 @@ check("ночь названа", "ночное время" in anomaly_mod.explai
 check("причин не больше двух",
       len(anomaly_mod.explain(make_window(hour=3, sitting=120, clicks=40), typical).split(", ")), 2)
 
-model = anomaly_mod.AnomalyModel()
-check("мало окон — не обучаемся", model.fit(typical[:10]), False)
-check("необученная модель молчит", model.score(make_window())[0], False)
-check("обучение на достаточной выборке", model.fit(typical), True)
-check("типичное окно не помечено", model.score(make_window())[0], False)
+# scikit-learn ставится отдельным флагом и на плате его обычно нет: он
+# тянет scipy и почти двести мегабайт, а нужен одному Режиму 6. Пропускаем
+# эту часть вместо падения — иначе весь набор тестов нельзя прогнать там,
+# где он нужнее всего, то есть на самом устройстве.
+try:
+    import sklearn  # noqa: F401
+    HAS_ML = True
+except ImportError:
+    HAS_ML = False
 
-with tempfile.TemporaryDirectory() as tmp:
-    path = Path(tmp) / "m.pkl"
-    model.save(path)
-    restored = anomaly_mod.AnomalyModel()
-    check("модель читается обратно", restored.load(path), True)
-    check("эталон сохранён", len(restored.reference), len(typical))
-    check("битый файл не роняет", anomaly_mod.AnomalyModel().load(Path(tmp) / "нет.pkl"), False)
+if HAS_ML:
+    model = anomaly_mod.AnomalyModel()
+    check("мало окон — не обучаемся", model.fit(typical[:10]), False)
+    check("необученная модель молчит", model.score(make_window())[0], False)
+    check("обучение на достаточной выборке", model.fit(typical), True)
+    check("типичное окно не помечено", model.score(make_window())[0], False)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "m.pkl"
+        model.save(path)
+        restored = anomaly_mod.AnomalyModel()
+        check("модель читается обратно", restored.load(path), True)
+        check("эталон сохранён", len(restored.reference), len(typical))
+        check("битый файл не роняет",
+              anomaly_mod.AnomalyModel().load(Path(tmp) / "нет.pkl"), False)
+else:
+    # Но проверить, что без библиотеки всё молчит, а не падает, обязаны:
+    # именно так блок и работает на плате прямо сейчас.
+    model = anomaly_mod.AnomalyModel()
+    check("без sklearn обучение не падает, а отказывает", model.fit(typical), False)
+    check("без sklearn модель молчит", model.score(make_window())[0], False)
+    print("    --  scikit-learn не установлен: обучение Режима 6 пропущено")
 
 print(f"\n  провалов: {failed}")
 raise SystemExit(1 if failed else 0)
