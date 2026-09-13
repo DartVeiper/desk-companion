@@ -43,6 +43,15 @@ internal static class Program
         Console.SetOut(stdout);
         Console.SetError(stderr);
 
+        if (args.Contains("--windows"))
+        {
+            // Разведка по окнам: показывает, к чему агент относит каждую
+            // запущенную программу. Хуков не ставит и к брокеру не ходит,
+            // поэтому запускать можно параллельно с работающим агентом.
+            foreach (var line in ActiveWindow.Describe()) Console.WriteLine(line);
+            return 0;
+        }
+
         if (args.Contains("--list-sensors"))
         {
             // Режим разведки: печатает всё, что видит LibreHardwareMonitor.

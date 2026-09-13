@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using LibreHardwareMonitor.Hardware;
 using NAudio.CoreAudioApi;
@@ -15,15 +16,32 @@ public static class ActiveWindow
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextW(IntPtr hWnd, char[] text, int count);
 
-    // Категории по имени процесса. Список заведомо неполный — под свои
-    // программы дополняется руками, всё незнакомое падает в "other".
+    // Категории по имени процесса. Список — только для того, что признаками
+    // не ловится: у браузеров и сред разработки нет общего каталога или
+    // суффикса, зато их немного и они меняются раз в несколько лет.
     private static readonly Dictionary<string, string> Known = new(StringComparer.OrdinalIgnoreCase)
     {
         ["rider64"] = "code", ["devenv"] = "code", ["code"] = "code",
-        ["pycharm64"] = "code", ["idea64"] = "code", ["WindowsTerminal"] = "code",
+        ["Code - Insiders"] = "code", ["cursor"] = "code", ["pycharm64"] = "code",
+        ["idea64"] = "code", ["clion64"] = "code", ["webstorm64"] = "code",
+        ["goland64"] = "code", ["sublime_text"] = "code", ["WindowsTerminal"] = "code",
+        ["powershell"] = "code", ["pwsh"] = "code", ["mintty"] = "code",
+
         ["chrome"] = "browser", ["firefox"] = "browser", ["msedge"] = "browser",
-        ["steam"] = "game", ["cs2"] = "game", ["dota2"] = "game",
-        ["RustClient"] = "game", ["FactoryGame"] = "game",
+        ["opera"] = "browser", ["opera_gx"] = "browser", ["brave"] = "browser",
+        ["vivaldi"] = "browser", ["browser"] = "browser", ["zen"] = "browser",
+        ["arc"] = "browser",
+
+        ["steam"] = "game", ["EpicGamesLauncher"] = "game",
+    };
+
+    //: Каталоги игровых библиотек. Признак сильный: под steamapps\\common
+    //: не лежит ничего, кроме игр.
+    private static readonly string[] GameFolders =
+    {
+        @"\steamapps\common\", @"\Epic Games\", @"\GOG Galaxy\Games\",
+        @"\Riot Games\", @"\Battle.net\", @"\Origin Games\",
+        @"\EA Games\", @"\Ubisoft\", @"\XboxGames\",
     };
 
     public static (string Process, string Title, string Category) Current()
@@ -36,16 +54,90 @@ public static class ActiveWindow
         var length = GetWindowTextW(handle, buffer, buffer.Length);
         var title = length > 0 ? new string(buffer, 0, length) : "";
 
-        string process;
-        try { process = Process.GetProcessById((int)pid).ProcessName; }
+        Process handleProcess;
+        try { handleProcess = Process.GetProcessById((int)pid); }
         catch (ArgumentException) { return ("", title, "other"); }
 
-        if (Known.TryGetValue(process, out var category)) return (process, title, category);
+        var process = handleProcess.ProcessName;
+        if (Known.TryGetValue(process, out var known)) return (process, title, known);
+        return (process, title, Guess(process, PathOf(handleProcess)));
+    }
 
-        // Steam запоминает последнюю игру, но проще опереться на то, что
-        // игры почти всегда идут полноэкранно из своего каталога. Здесь
-        // достаточно грубой эвристики: точное имя игры — задача бэклога.
-        return (process, title, "other");
+    /// <summary>
+    /// Как агент видит каждое окно на экране.
+    ///
+    /// Нужно, чтобы вопрос «почему часы считают, что я занят прочим»
+    /// решался за десять секунд, а не перебором догадок: видно и имя
+    /// процесса, и путь, по которому принималось решение.
+    /// </summary>
+    public static IEnumerable<string> Describe()
+    {
+        yield return $"{"процесс",-34} {"занятие",-9} путь";
+        yield return new string('-', 100);
+        foreach (var process in Process.GetProcesses()
+                     .Where(p => p.MainWindowHandle != IntPtr.Zero)
+                     .OrderBy(p => p.ProcessName))
+        {
+            var path = PathOf(process);
+            var category = Known.TryGetValue(process.ProcessName, out var known)
+                ? known + " (по списку)"
+                : Guess(process.ProcessName, path);
+            yield return $"{process.ProcessName,-34} {category,-9} "
+                         + (path.Length > 0 ? path : "путь не виден");
+        }
+    }
+
+    /// <summary>Путь к файлу процесса. Пусто — не дали посмотреть.</summary>
+    private static string PathOf(Process process)
+    {
+        try { return process.MainModule?.FileName ?? ""; }
+        catch (Exception)
+        {
+            // Процесс запущен от администратора, а мы нет — обычное дело,
+            // и это не повод ничего не определить: суффикс имени остаётся.
+            return "";
+        }
+    }
+
+    /// <summary>
+    /// Угадать занятие по признакам, а не по имени.
+    ///
+    /// Список игр вести руками бессмысленно: их у человека десятки, и
+    /// каждая новая до правки кода будет считаться «прочим». Признаки же
+    /// покрывают сразу целые классы:
+    ///
+    ///   • каталог игровой библиотеки — под steamapps\common и подобными
+    ///     не лежит ничего, кроме игр;
+    ///   • суффикс -Win64-Shipping — так называется собранная под релиз
+    ///     игра на Unreal Engine, любая;
+    ///   • папка «Имя_Data» рядом с файлом — так устроена любая сборка Unity.
+    /// </summary>
+    internal static string Guess(string process, string path)
+    {
+        if (process.EndsWith("-Win64-Shipping", StringComparison.OrdinalIgnoreCase) ||
+            process.EndsWith("-WinGDK-Shipping", StringComparison.OrdinalIgnoreCase))
+            return "game";
+
+        if (path.Length == 0) return "other";
+
+        foreach (var folder in GameFolders)
+            if (path.Contains(folder, StringComparison.OrdinalIgnoreCase))
+                return "game";
+
+        try
+        {
+            var folder = Path.GetDirectoryName(path);
+            var name = Path.GetFileNameWithoutExtension(path);
+            if (folder is not null && name.Length > 0 &&
+                Directory.Exists(Path.Combine(folder, name + "_Data")))
+                return "game";
+        }
+        catch (Exception)
+        {
+            // Путь с недопустимыми символами — просто не угадали.
+        }
+
+        return "other";
     }
 }
 
