@@ -47,20 +47,20 @@ WIRES = [
     (3, "воздух SCD41", "SDA", "GPIO2", AIR),
     (4, "радар LD2410", "VCC", "5 В — не 3,3!", POWER),
     (5, "воздух SCD41", "SCL", "GPIO3", AIR),
-    (6, "экран", "GND", "общий", GROUND),
+    (6, "экран", "GND", "земля, свой провод", GROUND),
     (8, "радар LD2410", "RX", "GPIO14 — это TX платы", RADAR),
-    (9, "энкодер", "GND", "общий", GROUND),
+    (9, "энкодер", "GND", "земля, свой провод", GROUND),
     (10, "радар LD2410", "TX", "GPIO15 — это RX платы", RADAR),
     (11, "энкодер", "CLK", "GPIO17", ENCODER),
     (12, "экран", "LED", "GPIO18 · подсветка", DISPLAY),
     (13, "энкодер", "DT", "GPIO27", ENCODER),
-    (14, "воздух SCD41", "GND", "общий", GROUND),
+    (14, "воздух SCD41", "GND", "земля, свой провод", GROUND),
     (15, "энкодер", "SW", "GPIO22 · кнопка", ENCODER),
     (17, "экран", "VCC", "3,3 В", POWER),
     (18, "экран", "RESET", "GPIO24", DISPLAY),
     (19, "экран", "SDI (MOSI)", "GPIO10 · тройник", DISPLAY),
     (19, "тач", "T_DIN", "тот же тройник", TOUCH),
-    (20, "радар LD2410", "GND", "общий", GROUND),
+    (20, "радар LD2410", "GND", "земля, свой провод", GROUND),
     (21, "экран", "SDO (MISO)", "GPIO9 · тройник", DISPLAY),
     (21, "тач", "T_DO", "тот же тройник", TOUCH),
     (22, "экран", "DC / RS", "GPIO25", DISPLAY),
@@ -81,7 +81,7 @@ SPLITTERS = [
 
 LEGEND = [("экран ST7796S", DISPLAY), ("тач XPT2046", TOUCH),
           ("энкодер KY-040", ENCODER), ("радар LD2410", RADAR),
-          ("датчик воздуха SCD41", AIR), ("питание", POWER), ("общий GND", GROUND)]
+          ("датчик воздуха SCD41", AIR), ("питание", POWER), ("земля GND", GROUND)]
 
 ROW = 42
 PIN_ROW = 32
