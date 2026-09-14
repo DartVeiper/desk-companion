@@ -1,33 +1,17 @@
 # Переводы строк.
 #
-# Разработка идёт на Windows, где core.autocrlf=true по умолчанию, а
-# исполняется всё на Linux. Без этого файла git при каждой выдаче переписывал
-# бы скрипты в CRLF, и на Pi они падали бы с «\r: command not found» — ошибка
-# невнятная, а искать её будешь в самом скрипте, а не в переводах строк.
+# Git по умолчанию считает, что на Windows в рабочем каталоге должны быть
+# CRLF, и предупреждает об этом при каждом добавлении файла. Предупреждений
+# набегает по десятку на коммит, их перестают читать, и однажды среди них
+# теряется настоящее.
 #
-# То же касается юнитов systemd и конфигов: systemd на возврат каретки
-# ругается, а tomllib молча примет его частью строкового значения.
+# Нам эта подмена не нужна вовсе: половина кода уезжает на Linux, а редактор
+# давно понимает LF. Поэтому везде LF, и тишина в выводе.
+* text=auto eol=lf
 
-*.sh      text eol=lf
-*.py      text eol=lf
-*.toml    text eol=lf
-*.sql     text eol=lf
-*.service text eol=lf
-*.timer   text eol=lf
-*.json    text eol=lf
-
-# Файлы, которые открывают только на Windows, оставляем как есть.
-*.cs      text eol=crlf
-*.csproj  text eol=crlf
-*.manifest text eol=crlf
-
-# Двоичное git трогать не должен вовсе.
-*.ttf  binary
-*.png  binary
-*.db   binary
-*.pkl  binary
-
-# Сам этот файл тоже.
-.gitattributes text eol=lf
-.gitignore    text eol=lf
-*.md          text eol=lf
+# Двоичное — не трогать. Картинки и шрифты от «исправления» переводов строк
+# просто ломаются.
+*.png binary
+*.gif binary
+*.ttf binary
+*.db  binary

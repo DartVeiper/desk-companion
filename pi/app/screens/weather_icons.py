@@ -87,17 +87,23 @@ def _direction(angle: int) -> tuple[float, float]:
 
 
 def _moon(draw: ImageDraw.ImageDraw, x: float, y: float, size: float,
-          back) -> None:
+          back, bite_below: bool = False) -> None:
     """Месяц: круг, из которого вырезан второй круг цветом фона.
 
     Вырезаем перекрытием, а не маской: фон карточки сплошной, и результат
     тот же, зато без второго изображения и композиции поверх.
+
+    bite_below разворачивает вырез вниз, оставляя видимой верхнюю дугу.
+    Нужно для «малооблачно ночью»: там низ месяца закрывает облако, и при
+    обычном вырезе от него остаётся невнятная запятая — видимое и
+    вырезанное съедают друг друга.
     """
     radius = size * 0.3
     cx, cy = x + size * 0.52, y + size / 2
     draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=MOON)
     bite = radius * 0.92
-    bx, by = cx - radius * 0.52, cy - radius * 0.30
+    lift = radius * (0.34 if bite_below else -0.30)
+    bx, by = cx - radius * 0.52, cy + lift
     draw.ellipse((bx - bite, by - bite, bx + bite, by + bite), fill=back)
 
 
@@ -186,7 +192,8 @@ def draw_icon(draw: ImageDraw.ImageDraw, x: float, y: float, size: float,
         if day:
             _sun(draw, x + size * 0.20, y - size * 0.13, size * 0.72)
         else:
-            _moon(draw, x + size * 0.22, y - size * 0.12, size * 0.66, back)
+            _moon(draw, x + size * 0.26, y - size * 0.20, size * 0.70, back,
+                  bite_below=True)
         _cloud(draw, x, y + size * 0.10, size, scale=0.92)
         return
 
