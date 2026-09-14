@@ -23,6 +23,8 @@ from app.drivers import ld2410, scd41
 from app.inputs.events import Action, EventBus
 from app.inputs.gestures import GestureRecognizer
 from app import hardware
+from app import theme
+from app.screens import clock as clock_mod
 from app import radar_levels
 from app.sources.sensors import Ld2410Source, Scd41Source, TouchSource
 
@@ -523,6 +525,49 @@ with tempfile.TemporaryDirectory() as tmp:
     (Path(tmp) / "битый.json").write_text("{не json", encoding="utf-8")
     check("битый файл не роняет, а даёт пустую",
           radar_levels.Levels.load(Path(tmp) / "битый.json").samples, 0)
+
+# Сколько человек сидит без перерыва. Считается отдельно от presence_since:
+# тот отвечает на вопрос «когда радар в последний раз передумал» и
+# сбрасывается от минутной отлучки к принтеру.
+
+from app.stats import BREAK_MINUTES, WINDOW_HOURS  # noqa: E402
+
+sat = State(now=datetime(2026, 9, 14, 10, 0))
+start = sat.now
+check("пришёл — это изменение", sat.desk.note_presence(True, start, BREAK_MINUTES), True)
+check("то же присутствие второй раз — нет",
+      sat.desk.note_presence(True, start, BREAK_MINUTES), False)
+
+sat.now = start + timedelta(minutes=95)
+check("сидит полтора часа", sat.desk.sitting_minutes(sat.now), 95)
+
+# Отлучка короче перерыва счёт не сбрасывает.
+sat.desk.note_presence(False, start + timedelta(minutes=95), BREAK_MINUTES)
+sat.desk.note_presence(True, start + timedelta(minutes=97), BREAK_MINUTES)
+sat.now = start + timedelta(minutes=100)
+check("вышел на две минуты — счёт продолжился",
+      sat.desk.sitting_minutes(sat.now), 100)
+
+# Настоящий перерыв — сбрасывает.
+sat.desk.note_presence(False, start + timedelta(minutes=100), BREAK_MINUTES)
+sat.desk.note_presence(True, start + timedelta(minutes=100 + BREAK_MINUTES),
+                       BREAK_MINUTES)
+sat.now = start + timedelta(minutes=110)
+check("перерыв в пять минут — счёт с нуля",
+      sat.desk.sitting_minutes(sat.now), 5)   # вернулся на 105-й, сейчас 110-я
+
+check("ушёл — счёт остановлен",
+      (sat.desk.note_presence(False, sat.now, BREAK_MINUTES),
+       sat.desk.sitting_minutes(sat.now)), (True, 0))
+
+# Заголовок часов предупреждает, а не просто сообщает.
+warn = State(now=datetime(2026, 9, 14, 10, 0))
+warn.desk.note_presence(True, warn.now, BREAK_MINUTES)
+check("час за столом — обычный статус", clock_mod.status(warn)[0], "за столом")
+warn.now += timedelta(hours=WINDOW_HOURS)
+check("два часа — предупреждение", clock_mod.status(warn)[0],
+      f"{WINDOW_HOURS} ч без перерыва")
+check("и цвет тревожный", clock_mod.status(warn)[1], theme.WARN)
 
 # Текущий трек. Топик приходит с признаком «сохранять», чтобы после
 # перезапуска блока музыка появилась сразу, не дожидаясь следующей песни.

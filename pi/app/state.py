@@ -51,9 +51,50 @@ class Desk:
 
     presence: bool = False
     presence_since: datetime | None = None
+    #: С какого момента человек сидит без настоящего перерыва.
+    #:
+    #: Отдельно от presence_since, потому что это разные вопросы. Первый —
+    #: «когда радар в последний раз передумал», и он сбрасывается, стоит
+    #: отойти к принтеру на минуту. Второй — «сколько человек сидит», и
+    #: минутная отлучка его сбрасывать не должна: перерывом считается
+    #: отсутствие не меньше BREAK_MINUTES, так же как в дневной статистике.
+    sitting_since: datetime | None = None
+    #: Когда ушёл. Нужно, чтобы отличить отлучку от перерыва.
+    away_since: datetime | None = None
     manual_status: str | None = None
     manual_until: datetime | None = None
     streak_days: int = 0
+
+    def note_presence(self, present: bool, now: datetime,
+                      break_minutes: int) -> bool:
+        """Отметить, что радар передумал. True — состояние изменилось.
+
+        Вся работа со временем сидения собрана здесь, а не размазана по
+        источникам: настоящий радар и поддельный должны считать одинаково,
+        иначе экран на машине разработки будет врать про то, чего на плате
+        не происходит.
+        """
+        if present == self.presence:
+            return False
+
+        self.presence = present
+        self.presence_since = now
+        if not present:
+            self.away_since = now
+            return True
+
+        gone = now - self.away_since if self.away_since else None
+        if self.sitting_since is None or (
+                gone is not None and gone >= timedelta(minutes=break_minutes)):
+            self.sitting_since = now
+        self.away_since = None
+        return True
+
+    def sitting_minutes(self, now: datetime) -> int:
+        """Сколько минут человек сидит без перерыва. Ноль — его нет."""
+        if not self.presence or self.sitting_since is None:
+            return 0
+        return max(0, int((now - self.sitting_since).total_seconds() // 60))
 
 
 @dataclass

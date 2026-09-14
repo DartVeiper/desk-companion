@@ -13,6 +13,7 @@ import random
 from datetime import datetime
 
 from ..state import State
+from ..stats import BREAK_MINUTES
 from .base import Source
 
 WORK_HOURS = (9, 13), (14, 19), (20, 23)
@@ -40,11 +41,7 @@ class FakePresenceSource(Source):
         # Зерно от часа: внутри часа решение стабильно, а не мигает.
         rng = random.Random(now.hour * 100 + now.day)
         present = _at_desk(now, rng)
-        if present == state.desk.presence:
-            return False
-        state.desk.presence = present
-        state.desk.presence_since = now
-        return True
+        return state.desk.note_presence(present, now, BREAK_MINUTES)
 
 
 class FakeEnvSource(Source):

@@ -88,6 +88,9 @@ def states() -> list[tuple[str, State]]:
     full.pc.track_title = ("Симфония №7 до мажор, часть III — "
                            "Allegro molto vivace (концертная запись)")
     full.pc.track_playing = True
+    # Три часа без перерыва: заголовок становится длиннее обычного «за
+    # столом», а справа от него живёт «ПК офлайн».
+    full.desk.note_presence(True, now - timedelta(hours=3), 5)
     full.desk.manual_status = "не беспокоить"
     full.desk.manual_until = now + timedelta(hours=4, minutes=37)
     full.desk.streak_days = 128

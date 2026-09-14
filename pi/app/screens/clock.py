@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 
 from .. import theme
 from ..state import State
+from ..stats import WINDOW_HOURS
 from . import weather_icons as icons
 from . import widgets as w
 from .base import Screen
@@ -33,9 +34,21 @@ def date_text(state: State) -> str:
 
 
 def status(state: State) -> tuple[str, tuple[int, int, int]]:
+    """Что написать в заголовке про человека за столом.
+
+    Про перерыв сообщаем здесь, а не отдельным экраном: отдельный пришлось
+    бы искать вращением, а к тому времени, когда до него долистаешь, он уже
+    не нужен. Заголовок же виден всегда и ничего не занимает.
+    """
     if state.desk.manual_status:
         return state.desk.manual_status, theme.WARN
-    return ("за столом", theme.OK) if state.desk.presence else ("никого", theme.DIM)
+    if not state.desk.presence:
+        return "никого", theme.DIM
+
+    minutes = state.desk.sitting_minutes(state.now)
+    if minutes >= WINDOW_HOURS * 60:
+        return f"{minutes // 60} ч без перерыва", theme.WARN
+    return "за столом", theme.OK
 
 
 def cells(state: State) -> list[tuple[str, str, tuple[int, int, int]]]:

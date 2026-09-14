@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from ..drivers import ld2410, scd41
+from ..stats import BREAK_MINUTES
 from ..radar_levels import Levels
 from ..state import State
 from .base import Source
@@ -236,14 +237,9 @@ class Ld2410Source(Source):
         if report.moving_gates:
             self.levels.add(report.moving_gates, report.static_gates)
             self._maybe_save()
-        if report.present == state.desk.presence:
-            return False
-
         # Время удержания настраивается в самом модуле (set_max_gates),
         # поэтому мигание гасится там, а не здесь.
-        state.desk.presence = report.present
-        state.desk.presence_since = state.now
-        return True
+        return state.desk.note_presence(report.present, state.now, BREAK_MINUTES)
 
     def _maybe_save(self) -> None:
         now = time.monotonic()
