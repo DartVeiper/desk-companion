@@ -9,14 +9,15 @@
 """
 
 from .base import Source
-from .desk import AnomalySource, ManualResetSource, StreakSource
+from .desk import (AnomalySource, EnvTrendSource, ManualResetSource,
+                   StreakSource)
 from .fake import FakeEnvSource, FakePcSource, FakePresenceSource
 from .system import SystemHealthSource
 from .weather import WeatherSource
 
 __all__ = [
     "Source",
-    "AnomalySource", "ManualResetSource", "StreakSource",
+    "AnomalySource", "EnvTrendSource", "ManualResetSource", "StreakSource",
     "FakeEnvSource", "FakePcSource", "FakePresenceSource",
     "SystemHealthSource", "WeatherSource",
 ]

@@ -90,6 +90,9 @@ def states() -> list[tuple[str, State]]:
     full.pc.track_playing = True
     # Три часа без перерыва: заголовок становится длиннее обычного «за
     # столом», а справа от него живёт «ПК офлайн».
+    # История CO2 для спарклайна: без неё ветка с графиком не рисуется
+    # вовсе, и наезд подписи на вердикт проверка не видит.
+    full.env.trend = [560 + (i * 7) % 340 for i in range(48)]
     full.desk.note_presence(True, now - timedelta(hours=3), 5)
     full.desk.manual_status = "не беспокоить"
     full.desk.manual_until = now + timedelta(hours=4, minutes=37)

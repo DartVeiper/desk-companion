@@ -9,6 +9,7 @@ from __future__ import annotations
 from PIL import Image, ImageDraw
 
 from .. import theme
+from ..sources.desk import EnvTrendSource
 from . import weather_icons as icons
 from ..state import State
 from . import widgets as w
@@ -105,6 +106,18 @@ class AirDetail(DetailScreen):
         draw.text((width - theme.PAD, 126), verdict,
                   font=w.fit_font(draw, verdict, width - theme.PAD - used - 18, theme.H2),
                   fill=theme.co2_color(env.co2), anchor="rs")
+
+        # Ход за последние часы — в свободной полосе справа вверху, под
+        # кнопкой возврата и над вердиктом. Число говорит, сколько сейчас;
+        # линия — растёт оно или падает, а проветривают именно по этому.
+        if len(env.trend) >= 2:
+            # Подпись над графиком, а не под ним: под ним живёт вердикт
+            # крупным шрифтом, и «пора проветрить» её перекрывало.
+            draw.text((246, 46),
+                      f"{EnvTrendSource.HOURS} ч · {min(env.trend)}-{max(env.trend)}",
+                      font=theme.font(theme.TINY), fill=theme.DIM, anchor="lm")
+            w.sparkline(draw, (246, 60, width - theme.PAD, 100), env.trend,
+                        theme.co2_color(env.co2))
 
         self._scale(draw, env.co2, (theme.PAD, 186, width - theme.PAD, 206))
 

@@ -441,6 +441,7 @@ def build_sources(args, storage: Database | None) -> list[Source]:
         out.append(src.WeatherSource(lat, lon))
     if storage is not None:
         out.append(src.StreakSource(storage))
+        out.append(src.EnvTrendSource(storage))
         out.append(src.AnomalySource(storage))
     if args.mqtt:
         from app.sources.mqtt import MqttSource

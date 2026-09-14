@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from ..state import State
@@ -86,6 +86,48 @@ class AnomalySource(Source):
             return False
         state.pc.anomaly_flag = flagged
         state.pc.anomaly_reason = reason
+        return True
+
+
+class EnvTrendSource(Source):
+    """Ход CO2 за последние часы — для спарклайна на экране воздуха.
+
+    Берём из базы, а не копим в памяти: в памяти история начиналась бы с
+    последнего перезапуска сервиса, а перезапускается он при каждой
+    доставке кода. График, который обнуляется от постороннего действия,
+    обманывает.
+
+    Раз в пять минут: сама база пополняется раз в десять, чаще спрашивать
+    нечего.
+    """
+
+    name = "env-trend"
+    interval = 300.0
+
+    #: За сколько часов показываем ход. Шесть — это «с обеда до вечера»:
+    #: достаточно, чтобы увидеть, как комната надышалась, и достаточно
+    #: мало, чтобы утренний провал не сплющил вечерний подъём.
+    HOURS = 6
+    #: Сколько точек рисуем. Больше не нужно: полоса шириной в пару сотен
+    #: точек всё равно не покажет разницы.
+    POINTS = 48
+
+    def __init__(self, db: Database) -> None:
+        super().__init__()
+        self.db = db
+
+    def poll(self, state: State) -> bool:
+        end = state.now
+        rows = self.db.env_between(end - timedelta(hours=self.HOURS), end)
+        values = [int(row["co2"]) for row in rows if row["co2"]]
+        if len(values) > self.POINTS:
+            # Прореживаем равномерно, а не берём последние: нужен весь
+            # промежуток, иначе график перестанет быть про шесть часов.
+            step = len(values) / self.POINTS
+            values = [values[int(i * step)] for i in range(self.POINTS)]
+        if values == state.env.trend:
+            return False
+        state.env.trend = values
         return True
 
 

@@ -202,6 +202,41 @@ def card(draw: ImageDraw.ImageDraw, box: Box, fill: Color | None = None) -> None
     draw.rounded_rectangle(box, radius=14, fill=fill or theme.SURFACE)
 
 
+def sparkline(draw: ImageDraw.ImageDraw, box: Box, values: list[int],
+              color, fill: Color | None = None) -> None:
+    """Ход величины ломаной линией внутри прямоугольника.
+
+    Размах берём по самим данным, а не по всей шкале прибора: на шкале от
+    400 до 2000 дневные колебания в полтораста единиц превращаются в
+    прямую, и график перестаёт что-либо говорить. Зато к размаху
+    добавляется минимальный запас — иначе ровный участок нарисовался бы
+    зубцами из шума в пару единиц, и спокойный день выглядел бы бурей.
+    """
+    if len(values) < 2:
+        return
+
+    left, top, right, bottom = box
+    low, high = min(values), max(values)
+    if high - low < 40:
+        middle = (high + low) / 2
+        low, high = middle - 20, middle + 20
+
+    step = (right - left) / (len(values) - 1)
+    points = [
+        (left + index * step,
+         bottom - (min(max(value, low), high) - low) / (high - low) * (bottom - top))
+        for index, value in enumerate(values)
+    ]
+
+    if fill is not None:
+        draw.polygon([(left, bottom), *points, (right, bottom)], fill=fill)
+    draw.line(points, fill=color, width=2, joint="curve")
+    # Точка на конце: она отвечает на вопрос «а сейчас-то сколько», ради
+    # которого на график и смотрят первым делом.
+    x, y = points[-1]
+    draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=color)
+
+
 def note(draw: ImageDraw.ImageDraw, x: float, y: float, color, height: float = 13) -> float:
     """Нотка из примитивов. Возвращает свою ширину.
 
