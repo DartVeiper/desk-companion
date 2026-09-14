@@ -97,11 +97,22 @@ class Recorder:
 
     ENV_EVERY = timedelta(minutes=10)
 
+    #: Сколько новое состояние должно продержаться, чтобы попасть в историю.
+    #:
+    #: Без выдержки каждое переключение окна писало строку, и за четыре
+    #: часа их набегало двести тридцать при восемнадцати настоящих сменах
+    #: присутствия. Заход в проводник на две секунды и обратно в игру —
+    #: это не смена занятия, а рябь, и в истории дня она только мешает
+    #: разглядеть, чем день был занят на самом деле.
+    SETTLE = timedelta(seconds=15)
+
     def __init__(self, storage: Database | None) -> None:
         self.storage = storage
         self._minute: datetime | None = None
         self._env_at: datetime | None = None
         self._last_event: tuple | None = None
+        self._pending: tuple | None = None
+        self._pending_since: datetime | None = None
 
     def tick(self, state: State) -> None:
         if self.storage is None:
@@ -139,13 +150,27 @@ class Recorder:
         signature = (state.desk.presence, state.pc.active_app,
                      state.pc.category, state.desk.manual_status)
         if signature == self._last_event:
+            self._pending = None
             return
+
+        # Состояние изменилось — но записываем не сразу, а когда оно
+        # продержится SETTLE. Пока держится, время его начала помним: в
+        # историю попадёт именно оно, а не момент, когда мы поверили.
+        if signature != self._pending:
+            self._pending = signature
+            self._pending_since = state.now
+            return
+        if state.now - (self._pending_since or state.now) < self.SETTLE:
+            return
+
+        presence, app, category, manual = signature
         if self._last_event is not None:  # первый кадр — не событие
             self.storage.add_state_event(
-                state.now, state.desk.presence, state.pc.active_app,
-                state.pc.category, state.pc.audio_active, state.desk.manual_status,
+                self._pending_since, presence, app, category,
+                state.pc.audio_active, manual,
             )
         self._last_event = signature
+        self._pending = None
 
 
 class Application:

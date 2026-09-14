@@ -128,13 +128,44 @@ with tempfile.TemporaryDirectory() as tmp:
     rec.tick(st)
     check("через 10 минут записан", len(db.env_between(datetime(2026, 8, 19), datetime(2026, 8, 20))), 2)
 
+    def events() -> int:
+        return db.conn.execute("SELECT COUNT(*) c FROM state_events").fetchone()["c"]
+
+    # Событие записывается не сразу: состояние должно продержаться. Без
+    # выдержки каждое переключение окна писало строку, и за четыре часа их
+    # набегало двести тридцать при восемнадцати сменах присутствия.
+    changed_at = datetime(2026, 8, 19, 10, 12, 30)
+    st.now = changed_at
     st.desk.presence = False
     rec.tick(st)
-    check("смена присутствия — событие",
-              db.conn.execute("SELECT COUNT(*) c FROM state_events").fetchone()["c"], 1)
+    check("сразу после смены — ещё не событие", events(), 0)
+
+    st.now = changed_at + Recorder.SETTLE - timedelta(seconds=1)
     rec.tick(st)
-    check("то же состояние второй раз — не событие",
-              db.conn.execute("SELECT COUNT(*) c FROM state_events").fetchone()["c"], 1)
+    check("не выдержало — всё ещё не событие", events(), 0)
+
+    st.now = changed_at + Recorder.SETTLE
+    rec.tick(st)
+    check("выдержало — событие записано", events(), 1)
+    check("время события — когда состояние началось, а не когда поверили",
+          db.conn.execute("SELECT ts FROM state_events").fetchone()["ts"],
+          changed_at.isoformat(sep=" "))
+
+    st.now += timedelta(seconds=30)
+    rec.tick(st)
+    check("то же состояние второй раз — не событие", events(), 1)
+
+    # Мелькнувшее окно не должно оставить следа: вернулись к прежнему
+    # состоянию раньше, чем оно выдержалось.
+    st.now += timedelta(seconds=1)
+    st.pc.active_app = "explorer"
+    rec.tick(st)
+    st.now += timedelta(seconds=2)
+    st.pc.active_app = ""
+    rec.tick(st)
+    st.now += timedelta(seconds=30)
+    rec.tick(st)
+    check("мелькнувшее окно следа не оставило", events(), 1)
     # Windows не отдаёт файл, пока соединение живо, и временный каталог
     # не удаляется. На Linux бы прошло молча — тем важнее закрыть явно.
     db.close()
