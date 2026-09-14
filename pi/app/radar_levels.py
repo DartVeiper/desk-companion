@@ -78,6 +78,16 @@ class Levels:
             "static": [self._percentile(self.static[gate], s) for s in shares],
         }
 
+    def share_above(self, gate: int, kind: str, level: int) -> float:
+        """Доля времени, что зона держалась выше уровня.
+
+        По ней видно, как часто комната вообще бывала занята, — а это
+        главное, что нужно знать, чтобы понимать остальные числа.
+        """
+        counts = (self.moving if kind == "moving" else self.static)[gate]
+        total = sum(counts)
+        return sum(counts[level + 1:]) / total if total else 0.0
+
     @property
     def hours(self) -> float:
         """Сколько времени копится. Кадры идут примерно десять раз в секунду."""

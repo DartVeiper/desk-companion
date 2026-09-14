@@ -46,12 +46,20 @@ def snapshot(state: State, sources: list | None = None,
     data = {
         "ts": state.now.isoformat(timespec="seconds"),
         "presence": state.desk.presence,
+        # Датчик воздуха ещё прогревается: первые минуты после запуска он
+        # завышает температуру, и показывать это как надёжное значение
+        # нечестно.
+        "settling": state.env.settling,
         "manual_status": state.desk.manual_status,
         "streak_days": state.desk.streak_days,
         "env": {"co2": state.env.co2, "temperature": state.env.temperature,
                 "humidity": state.env.humidity},
         "weather": {"temp": state.weather.temp, "cond": state.weather.cond,
-                    "rain_soon_minutes": state.weather.rain_soon_minutes},
+                    "rain_soon_minutes": state.weather.rain_soon_minutes,
+                    # Код и время суток нужны тем, кто рисует свой значок:
+                    # разбирать русское описание обратно — верный способ
+                    # однажды спутать дождь со снегом.
+                    "code": state.weather.code, "is_day": state.weather.is_day},
         "pc_online": state.pc_online,
         # Данные игрового ПК: их показывает дашборд, и по ним же видно,
         # доехал ли агент, — без этого «онлайн» говорит лишь о сердцебиении.
