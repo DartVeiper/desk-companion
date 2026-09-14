@@ -11,10 +11,19 @@
 1. **Координаты.** Панель отдаёт не пиксели, а сырые отсчёты, и границы у
    каждого экземпляра свои. Без калибровки тап уезжает на десятки пикселей.
 
-2. **Чувствительность.** Порог `z1_min` отделяет касание от шума. Слишком
-   высокий — приходится давить изо всех сил; слишком низкий — панель
-   «нажимает» сама. Здесь он не угадывается: сначала меряется покой, потом
-   ваши настоящие нажатия, и порог ставится между.
+2. **Чувствительность.** Порогов на самом деле два, и лёгкость нажатия
+   упирается в тот, что не очевиден.
+
+   `z1_min` отделяет касание от шума по току через панель.
+
+   `max_resistance` — по сопротивлению между слоями: чем сильнее давят,
+   тем оно меньше, и касание засчитывается, пока оно ниже порога. Именно
+   этот порог и заставляет давить сильнее, если стоит слишком низким.
+
+   Ни тот, ни другой здесь не угадываются: меряется покой, меряются ваши
+   настоящие нажатия, и пороги ставятся между. Причём нарочно ближе к
+   нажатию, чем к середине, — лишняя чувствительность обходится дешевле,
+   чем необходимость продавливать.
 
 Результат записывается прямо в `app/config.toml` — переписывать руками
 ничего не нужно.
@@ -66,7 +75,7 @@ def measure_idle(panel: xpt2046.Xpt2046) -> int:
     return peak
 
 
-def wait_press(panel: xpt2046.Xpt2046, floor: int) -> tuple[int, int, int]:
+def wait_press(panel: xpt2046.Xpt2046, floor: int) -> tuple[int, int, int, float]:
     """Ждать нажатия без ограничения по времени.
 
     Порог здесь заведомо низкий — задача не отфильтровать, а поймать даже
@@ -76,16 +85,25 @@ def wait_press(panel: xpt2046.Xpt2046, floor: int) -> tuple[int, int, int]:
     while True:
         if panel._read(xpt2046.CMD_Z1) >= floor:
             peak, raw = 0, None
+            # Самое слабое сопротивление за нажатие — это его самый
+            # уверенный миг. По нему и судим: порог должен пропускать
+            # даже такое касание, каким человек жмёт, когда не старается.
+            weakest = float("inf")
             while True:
                 z1 = panel._read(xpt2046.CMD_Z1)
                 if z1 < floor:
                     break
                 if z1 > peak:
                     peak, raw = z1, panel.raw()
+                z2 = panel._read(xpt2046.CMD_Z2)
+                x = panel._read(xpt2046.CMD_X)
+                value = xpt2046.touch_resistance(z1, z2, x, z1_min=1)
+                if value < weakest:
+                    weakest = value
                 time.sleep(0.02)
             time.sleep(SETTLE_S)
             if raw is not None:
-                return raw[0], raw[1], peak
+                return raw[0], raw[1], peak, weakest
         time.sleep(0.02)
 
 
@@ -132,22 +150,25 @@ def main() -> None:
     floor = max(idle_peak + 2, 8)
     presses = []
     corners = []
+    forces: list[float] = []
     for x, y, caption in (
         (MARGIN, MARGIN, "жми точно в крестик"),
         (theme.WIDTH - MARGIN, theme.HEIGHT - MARGIN, "теперь в этот"),
     ):
         target(display, x, y, caption, "нажимай как привычно, без усилия")
-        raw_x, raw_y, peak = wait_press(panel, floor)
+        raw_x, raw_y, peak, force = wait_press(panel, floor)
         corners.append((raw_x, raw_y))
         presses.append(peak)
+        forces.append(force)
         print(f"  угол ({x:3}, {y:3}) -> сырые ({raw_x:4}, {raw_y:4}), z1 {peak}")
 
     calibration = xpt2046.calibration_from_corners(corners[0], corners[1])
 
     target(display, theme.WIDTH // 2, theme.HEIGHT // 2,
            "проверка: жми в центр", "нажимай как привычно")
-    raw_x, raw_y, peak = wait_press(panel, floor)
+    raw_x, raw_y, peak, force = wait_press(panel, floor)
     presses.append(peak)
+    forces.append(force)
     got = xpt2046.to_screen(raw_x, raw_y, calibration, theme.WIDTH, theme.HEIGHT)
     error = ((got[0] - theme.WIDTH // 2) ** 2 + (got[1] - theme.HEIGHT // 2) ** 2) ** 0.5
 
@@ -157,15 +178,28 @@ def main() -> None:
     weakest = min(presses)
     z1_min = max(idle_peak + 2, int(idle_peak + (weakest - idle_peak) * 0.25))
 
+    # Порог силы — выше самого слабого из нажатий, с запасом. Ложные
+    # касания он не пропустит: у нетронутой панели координата X читается
+    # нулём, и сопротивление при этом считается бесконечным, сколько бы
+    # ни стоял порог. Так что поднимать его можно почти свободно, и
+    # скупиться тут незачем — скупость и означает «дави сильнее».
+    real = [f for f in forces if f != float("inf")]
+    max_resistance = int(max(real) * 1.6) if real else xpt2046.MAX_RESISTANCE
+
     print(f"\n  проверка центра: получилось {got}, промах {error:.0f} px")
     if error > 25:
         print("  промах великоват — стоит перекалибровать, целясь точнее")
 
     print(f"  нажатия дали z1 от {min(presses)} до {max(presses)}")
     print(f"  порог z1_min: {z1_min}  (было {cfg.get('z1_min', '—')})")
+    if real:
+        print(f"  сопротивление нажатий: от {min(real):.0f} до {max(real):.0f}")
+    print(f"  порог max_resistance: {max_resistance}  "
+          f"(было {cfg.get('max_resistance', int(xpt2046.MAX_RESISTANCE))})")
 
     values = dict(calibration.to_dict())
     values["z1_min"] = z1_min
+    values["max_resistance"] = max_resistance
     write_config(values)
 
     target(display, theme.WIDTH // 2, theme.HEIGHT // 2, "готово", "всё записано в конфиг")

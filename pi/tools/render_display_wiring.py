@@ -26,7 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import theme
 
-OUT = Path(__file__).resolve().parents[1] / "preview" / "подключение-экрана.png"
+# Картинка идёт в документацию, поэтому лежит в docs/, а не в preview:
+# preview — свалка побочных отрисовок и в репозиторий не попадает.
+OUT = Path(__file__).resolve().parents[2] / "docs" / "подключение-экрана.png"
 
 BG = (13, 13, 13)
 INK = (235, 235, 235)

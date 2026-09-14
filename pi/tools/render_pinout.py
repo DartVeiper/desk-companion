@@ -18,7 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import theme
 
-OUT = Path(__file__).resolve().parents[1] / "preview" / "распиновка.png"
+# Картинка идёт в документацию, поэтому лежит в docs/, а не в preview:
+# preview — свалка побочных отрисовок и в репозиторий не попадает.
+OUT = Path(__file__).resolve().parents[2] / "docs" / "распиновка.png"
 
 # Цвета устройств — из проверенной палитры дашборда, тёмный вариант.
 DISPLAY = (57, 135, 229)

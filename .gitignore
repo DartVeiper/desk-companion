@@ -8,11 +8,11 @@ __pycache__/
 *.db-shm
 *.db-wal
 
-# Live runtime preview output (regenerated on each run)
-pi/preview/backups/
-pi/preview/live/
-pi/preview/live.png
-pi/preview/status.json
+# Превью целиком — это свалка отрисовок и вывод бэкенда разработки.
+# Всё здесь создаётся запуском рисовалок и тестов, поэтому в репозитории
+# ему не место: больше половины файлов когда-то были именно этими
+# картинками. Те, на которые ссылается документация, лежат в docs/.
+pi/preview/
 pi/.version
 
 # Сборка ПК-агента. Самодостаточный exe весит под 150 МБ — в репозитории
