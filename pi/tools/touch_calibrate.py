@@ -40,6 +40,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import _calibration  # noqa: E402
 import _service  # noqa: E402
 
 from app import theme  # noqa: E402
@@ -47,6 +48,9 @@ from app.drivers import xpt2046  # noqa: E402
 from app.screens.registry import load_config  # noqa: E402
 
 CONFIG = Path(__file__).resolve().parents[1] / "app" / "config.toml"
+# Замеры пишем отдельно: config.toml приезжает с кодом и при
+# следующей доставке затёр бы их.
+MEASURED = CONFIG.parent / "calibration.toml"
 MARGIN = 34
 SETTLE_S = 0.4      # пауза после отпускания, чтобы не поймать дребезг
 IDLE_SAMPLES = 80   # сколько замеров покоя снять перед началом
@@ -108,16 +112,17 @@ def wait_press(panel: xpt2046.Xpt2046, floor: int) -> tuple[int, int, int, float
 
 
 def write_config(values: dict[str, object]) -> None:
-    """Вписать значения в блок [touch], не трогая остальной конфиг."""
-    text = CONFIG.read_text(encoding="utf-8")
-    for key, value in values.items():
-        literal = str(value).lower() if isinstance(value, bool) else str(value)
-        pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
-        if pattern.search(text):
-            text = pattern.sub(f"{key} = {literal}", text, count=1)
-        else:
-            text = text.replace("[touch]", f"[touch]\n{key} = {literal}", 1)
-    CONFIG.write_text(text, encoding="utf-8", newline="\n")
+    """Записать замеры в calibration.toml, поверх config.toml."""
+    _calibration.save(MEASURED, "touch", values, notes={
+        "x_min":
+            "Границы сырых значений АЦП этой панели. Подобраны\n"
+            "tools/touch_calibrate.py по нажатиям в углы.",
+        "max_resistance":
+            "Порог силы нажатия. Сопротивление обратно силе, поэтому\n"
+            "низкое значение означает «дави сильнее».",
+        "z1_min":
+            "Ниже этого z1 панель считается нетронутой.",
+    })
 
 
 def main() -> None:
@@ -132,7 +137,11 @@ def main() -> None:
     cfg = load_config(CONFIG)["touch"]
     from app.display.st7796s import open_spi
 
-    display = open_spi(speed_hz=cfg.get("display_speed_hz", 16_000_000))
+    # Скорость берём из раздела экрана, а не выдумываем свой ключ:
+    # display_speed_hz в конфиге нет, и значение по умолчанию совпадало с
+    # настоящим по чистой случайности.
+    display = open_spi(speed_hz=load_config(CONFIG).get("display", {}).get(
+        "speed_hz", 16_000_000))
 
     spi = spidev.SpiDev()
     spi.open(cfg["spi_bus"], cfg["spi_device"])

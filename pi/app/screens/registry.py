@@ -60,9 +60,40 @@ class ScreenRegistry:
         return False
 
 
+#: Замеры конкретного экземпляра: пороги тача и радара, границы АЦП.
+#: Лежат отдельно от config.toml и накладываются поверх него.
+CALIBRATION = "calibration.toml"
+
+
 def load_config(path: Path | str) -> dict:
-    with Path(path).open("rb") as fh:
-        return tomllib.load(fh)
+    """Настройки проекта плюс замеры этого экземпляра.
+
+    Почему два файла, а не один. config.toml — часть проекта: он едет с
+    кодом и одинаков у всех. Калибровка же принадлежит конкретной панели и
+    конкретной комнате, и в репозитории ей не место.
+
+    А главное — доставка кода перезаписывает всё, что приехало из
+    репозитория. Пока калибровка писалась в config.toml, она жила до
+    следующего deploy.sh и пропадала молча: пороги радара, подобранные по
+    суточной статистике, стёрлись первой же доставкой, и заметить это
+    можно было только по поведению.
+    """
+    path = Path(path)
+    with path.open("rb") as fh:
+        config = tomllib.load(fh)
+
+    measured = path.parent / CALIBRATION
+    if not measured.exists():
+        return config
+    with measured.open("rb") as fh:
+        overlay = tomllib.load(fh)
+
+    for section, values in overlay.items():
+        if isinstance(values, dict) and isinstance(config.get(section), dict):
+            config[section].update(values)
+        else:
+            config[section] = values
+    return config
 
 
 def load(config_path: Path | str) -> ScreenRegistry:

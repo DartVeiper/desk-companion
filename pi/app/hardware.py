@@ -71,6 +71,9 @@ def open_display(cfg: dict):
     # gpiozero освободит ножки, и экран погаснет без единой ошибки.
 
     display = St7796sDisplay(
+        # У красных модулей порядок цветов BGR, но встречаются и RGB —
+        # у них синий покажется вместо красного.
+        bgr=cfg.get("rotation_bgr", True),
         # writebytes2 сам режет большие блоки и не требует list(), в отличие
         # от writebytes — на кадре в 300 КБ разница заметная.
         write=spi.writebytes2,

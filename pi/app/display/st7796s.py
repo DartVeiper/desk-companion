@@ -29,17 +29,34 @@ SWRESET, SLPOUT, NORON, INVOFF, DISPON = 0x01, 0x11, 0x13, 0x20, 0x29
 CASET, RASET, RAMWR, MADCTL, COLMOD = 0x2A, 0x2B, 0x2C, 0x36, 0x3A
 CSCON = 0xF0  # разблокировка вендорских регистров
 
-# MADCTL: альбомная ориентация, порядок цветов BGR.
-# Красные модули ST7796S почти всегда BGR; если цвета окажутся
-# перепутаны местами (синий вместо красного) — снять бит 0x08.
-MADCTL_LANDSCAPE = 0x28 | 0x08
+# MADCTL: альбомная ориентация. Бит 0x08 переключает порядок цветов на
+# BGR — красные модули ST7796S почти всегда такие, но встречаются и RGB,
+# и тогда синий показывается вместо красного.
+#
+# Значение собирается по флагу, а не зашито: в конфиге стоит rotation_bgr,
+# и до этой правки он был мёртвой ручкой — и конфиг, и README советовали
+# его переключить, а код его не читал. Совет, который ничего не делает,
+# хуже отсутствия совета: по нему ищут не там.
+#: Только ориентация: обмен строк и столбцов (бит MV). Без цвета.
+#: Осторожно с арифметикой: привычное для этих модулей 0x28 — это уже
+#: MV вместе с BGR, бит 0x08 в нём стоит. Сложив 0x28 с 0x08, получишь
+#: то же 0x28 и решишь, что флаг работает, хотя он не менял ничего.
+MADCTL_LANDSCAPE = 0x20
+#: Только порядок цветов.
+MADCTL_BGR = 0x08
+
+
+def madctl(bgr: bool = True) -> int:
+    """Значение MADCTL под нужный порядок цветов."""
+    return MADCTL_LANDSCAPE | (MADCTL_BGR if bgr else 0)
+
 
 INIT: tuple[tuple[int, bytes, float], ...] = (
     (SWRESET, b"", 0.150),
     (SLPOUT, b"", 0.120),
     (CSCON, b"\xc3", 0),          # разблокировать команды вендора
     (CSCON, b"\x96", 0),
-    (MADCTL, bytes([MADCTL_LANDSCAPE]), 0),
+    (MADCTL, bytes([madctl()]), 0),   # порядок цветов уточняется в begin()
     (COLMOD, b"\x55", 0),          # 16 бит на точку, RGB565
     (0xB4, b"\x01", 0),            # инверсия строк выключена
     (0xB6, b"\x80\x02\x3b", 0),    # управление дисплеем
@@ -67,9 +84,13 @@ class St7796sDisplay(BandedDisplay):
         width: int = theme.WIDTH,
         height: int = theme.HEIGHT,
         chunk: int = 0,
+        bgr: bool = True,
     ) -> None:
         super().__init__()
         self.width, self.height = width, height
+        #: Порядок цветов модуля. У красных плат ST7796S почти всегда BGR,
+        #: но встречаются и RGB — у них синий покажется вместо красного.
+        self.bgr = bgr
         self._write = write
         self._set_dc = set_dc
         self._set_reset = set_reset
@@ -119,6 +140,10 @@ class St7796sDisplay(BandedDisplay):
             self.command(code, payload)
             if pause:
                 time.sleep(pause)
+        # Порядок цветов — после общей последовательности: так значение из
+        # конфига перекрывает то, что стоит в INIT по умолчанию, и правка
+        # одной строки не требует трогать саму последовательность запуска.
+        self.command(MADCTL, bytes([madctl(self.bgr)]))
         self.invalidate()
 
     def backlight(self, level: float) -> None:

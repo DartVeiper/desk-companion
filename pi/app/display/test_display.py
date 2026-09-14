@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app import theme
 from app.display.banded import (BandedDisplay, band_bounds, changed_runs,
                                 changed_tiles, to_rgb565)
+from app.display import st7796s
 from app.display.st7796s import CASET, RAMWR, RASET, St7796sDisplay
 from app.screens.clock import ClockScreen
 from app.state import Env, State, Weather
@@ -190,6 +191,20 @@ print(f"\n  смена минуты на Режиме 1, шина 32 МГц:")
 print(f"    полный кадр       {timing(full)}")
 print(f"    только полосами   {timing(bands_only)}   в {full / bands_only:.1f} раза меньше")
 print(f"    плитками          {timing(minute)}   в {full / minute:.1f} раза меньше")
+
+print("\nПорядок цветов")
+
+# Флаг rotation_bgr был мёртвой ручкой: и конфиг, и README советовали его
+# переключить, а код его не читал. Теперь читает — и проверка следит, чтобы
+# значение для BGR осталось ровно прежним, иначе первая же сборка после
+# правки покажет синий вместо красного.
+#
+# Отдельно проверяется ориентация без цвета: привычное 0x28 — это уже MV
+# вместе с BGR, и сложение 0x28 с 0x08 даёт то же 0x28. На этом легко
+# решить, что флаг работает, хотя он не меняет ничего.
+check("BGR — то же значение, что было зашито", hex(st7796s.madctl(True)), "0x28")
+check("RGB снимает только бит цвета", hex(st7796s.madctl(False)), "0x20")
+check("ориентация отдельно от цвета", hex(st7796s.MADCTL_LANDSCAPE), "0x20")
 
 print("\nКеш растров шрифта")
 

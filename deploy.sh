@@ -35,7 +35,8 @@ EXCLUDES=(
     --exclude='*.db-shm'
     --exclude=preview        # отрисованные картинки нужны на машине разработки
     --exclude=.git
-    --exclude=settings.json  # настройки принадлежат конкретному блоку
+    --exclude=settings.json      # настройки принадлежат конкретному блоку
+    --exclude=calibration.toml   # замеры этой панели и этой комнаты
 )
 
 printf '\n\033[1;36m==> Доставка на %s:~/%s\033[0m\n' "$TARGET" "$REMOTE_DIR"

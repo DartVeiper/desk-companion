@@ -42,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import _calibration  # noqa: E402
 import _service  # noqa: E402
 
 from app.drivers import ld2410  # noqa: E402
@@ -49,6 +50,9 @@ from app.screens.registry import load_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "app" / "config.toml"
+# Замеры пишем отдельно: config.toml приезжает с кодом и при
+# следующей доставке затёр бы их.
+MEASURED = CONFIG.parent / "calibration.toml"
 PROFILE = ROOT / "data" / "radar_profile.json"
 GATE_CM = 75
 LEAVE_SECONDS = 30
@@ -175,28 +179,25 @@ def table(empty_m, empty_s, desk_m, desk_s, gate_moving, gate_static,
 
 def write_config(moving: list[int], static: list[int],
                  max_moving: int, max_static: int) -> None:
-    """Вписать пороги в блок [radar], не трогая остальной конфиг."""
-    text = CONFIG.read_text(encoding="utf-8")
-    block = (
-        "# Пороги по зонам дальности, подобраны tools/radar_calibrate.py по\n"
-        "# замеру пустой комнаты. Чем больше число, тем менее чувствительна\n"
-        "# зона. Сто в дальних зонах означает «сюда не смотреть».\n"
-        f"gate_moving = {moving}\n"
-        f"gate_static = {static}\n"
-        "# Дальше этих зон радар не смотрит вовсе: движение в другом конце\n"
-        "# комнаты присутствием за столом не является.\n"
-        f"max_moving_gate = {max_moving}\n"
-        f"max_static_gate = {max_static}\n"
-        "# Сколько модуль держит присутствие после пропадания сигнала.\n"
-        "# Короткое значение даёт мигание у неподвижно сидящего человека.\n"
-        "idle_seconds = 30\n"
-    )
-    for key in ("gate_moving", "gate_static", "max_moving_gate",
-                "max_static_gate", "idle_seconds"):
-        text = re.sub(rf"^{key}\s*=.*$\n?", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^# Пороги по зонам.*?\n(?:^#.*\n)*", "", text, flags=re.MULTILINE)
-    text = text.replace("[radar]\n", "[radar]\n" + block, 1)
-    CONFIG.write_text(text, encoding="utf-8", newline="\n")
+    """Записать пороги в calibration.toml, поверх config.toml."""
+    _calibration.save(MEASURED, "radar", {
+        "gate_moving": moving,
+        "gate_static": static,
+        "max_moving_gate": max_moving,
+        "max_static_gate": max_static,
+        "idle_seconds": 30,
+    }, notes={
+        "gate_moving":
+            "Пороги по зонам дальности, подобраны tools/radar_calibrate.py.\n"
+            "Чем больше число, тем менее чувствительна зона.\n"
+            "Сто в дальних зонах означает «сюда не смотреть».",
+        "max_moving_gate":
+            "Дальше этих зон радар не смотрит вовсе: движение в другом\n"
+            "конце комнаты присутствием за столом не является.",
+        "idle_seconds":
+            "Сколько модуль держит присутствие после пропадания сигнала.\n"
+            "Короткое значение даёт мигание у неподвижно сидящего человека.",
+    })
 
 
 def open_port():
