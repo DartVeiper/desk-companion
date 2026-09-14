@@ -12,6 +12,10 @@ namespace DeskAgent;
 public static class ActiveWindow
 {
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+
+    private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextW(IntPtr hWnd, char[] text, int count);
@@ -44,7 +48,14 @@ public static class ActiveWindow
         @"\EA Games\", @"\Ubisoft\", @"\XboxGames\",
     };
 
-    public static (string Process, string Title, string Category) Current()
+    /// <summary>
+    /// Что за программа сейчас впереди и к чему её отнести.
+    ///
+    /// gpuLoad — загрузка видеокарты в этот момент. Нужна для последнего
+    /// признака: см. Guess.
+    /// </summary>
+    public static (string Process, string Title, string Category) Current(
+        double? gpuLoad = null)
     {
         var handle = GetForegroundWindow();
         if (handle == IntPtr.Zero) return ("", "", "other");
@@ -59,8 +70,10 @@ public static class ActiveWindow
         catch (ArgumentException) { return ("", title, "other"); }
 
         var process = handleProcess.ProcessName;
+        if (Overrides.For(process) is { } chosen) return (process, title, chosen);
         if (Known.TryGetValue(process, out var known)) return (process, title, known);
-        return (process, title, Guess(process, PathOf(handleProcess)));
+        return (process, title,
+                Guess(process, PathOf(handleProcess), gpuLoad, Fullscreen(handle)));
     }
 
     /// <summary>
@@ -85,6 +98,19 @@ public static class ActiveWindow
             yield return $"{process.ProcessName,-34} {category,-9} "
                          + (path.Length > 0 ? path : "путь не виден");
         }
+    }
+
+    /// <summary>Окно занимает весь экран целиком.</summary>
+    private static bool Fullscreen(IntPtr handle)
+    {
+        if (!GetWindowRect(handle, out var rect)) return false;
+        var width = GetSystemMetrics(0);
+        var height = GetSystemMetrics(1);
+        if (width <= 0 || height <= 0) return false;
+        // С допуском: у игр в «оконном без рамки» края иногда на пиксель
+        // выходят за экран, а у развёрнутого окна снизу остаётся панель.
+        return rect.Right - rect.Left >= width - 2
+            && rect.Bottom - rect.Top >= height - 2;
     }
 
     /// <summary>Путь к файлу процесса. Пусто — не дали посмотреть.</summary>
@@ -112,7 +138,13 @@ public static class ActiveWindow
     ///     игра на Unreal Engine, любая;
     ///   • папка «Имя_Data» рядом с файлом — так устроена любая сборка Unity.
     /// </summary>
-    internal static string Guess(string process, string path)
+    //: Ниже этой загрузки видеокарты полноэкранное окно игрой не считаем.
+    //: Сорок процентов выбраны так, чтобы не поймать видео на весь экран:
+    //: аппаратное декодирование редко забирает больше двадцати.
+    private const double GameGpuLoad = 40;
+
+    internal static string Guess(string process, string path,
+                                 double? gpuLoad = null, bool fullscreen = false)
     {
         if (process.EndsWith("-Win64-Shipping", StringComparison.OrdinalIgnoreCase) ||
             process.EndsWith("-WinGDK-Shipping", StringComparison.OrdinalIgnoreCase))
@@ -136,6 +168,14 @@ public static class ActiveWindow
         {
             // Путь с недопустимыми символами — просто не угадали.
         }
+
+        // Последний признак — по поведению, а не по месту на диске. Он
+        // единственный работает для игры, поставленной куда попало: сборка
+        // модов Skyrim живёт в E:\OmenRim\Stock Game, ни Steam, ни Unreal,
+        // ни Unity её не выдают. Зато игра всегда занимает весь экран и
+        // всегда грузит видеокарту — этим она от всего остального и
+        // отличается.
+        if (fullscreen && gpuLoad >= GameGpuLoad) return "game";
 
         return "other";
     }

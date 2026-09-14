@@ -56,6 +56,7 @@ public sealed class CategoryRow
 public partial class MainWindow : Window
 {
     private readonly Board _board = new();
+    private readonly Backup _backup;
     private readonly Settings _settings;
     private readonly System.Collections.ObjectModel.ObservableCollection<ScreenRow> _screens = new();
     private readonly System.Windows.Threading.DispatcherTimer _timer = new();
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _settings = settings;
+        _backup = new Backup(_board);
         _board.Host = settings.Host;
         _board.Port = settings.Port;
 
@@ -100,7 +102,11 @@ public partial class MainWindow : Window
             if (IsVisible) Refresh();
         };
 
-        Loaded += async (_, _) => await RefreshScreensAsync();
+        Loaded += async (_, _) =>
+        {
+            await RefreshScreensAsync();
+            ShowBackupState();
+        };
     }
 
     /// <summary>Переключить страницу снаружи — нужно режиму снимка.</summary>
@@ -136,6 +142,13 @@ public partial class MainWindow : Window
         // каждую секунду — зря будить и сеть, и базу на блоке.
         if (_ticks++ % 30 == 0)
             ApplyToday(await _board.TodayAsync());
+
+        // Копию базы снимаем раз в сутки и только когда блок на связи.
+        // Проверка дешёвая — время правки файла, — поэтому спрашиваем на
+        // каждом круге, а не по расписанию: расписание пришлось бы чинить
+        // после каждого сна компьютера.
+        if (live is not null && await _backup.EnsureTodayAsync())
+            ShowBackupState();
     }
 
     private void ApplyLive(Live? live)
@@ -361,6 +374,37 @@ public partial class MainWindow : Window
             : $"отвечает, версия {live.Version}";
         TestResult.Foreground = (Brush)FindResource(live is null ? "Alert" : "Ok");
         if (live is not null) await RefreshScreensAsync();
+    }
+
+    private void ShowBackupState()
+    {
+        var at = _backup.LastAt();
+        BackupState.Text = at is null
+            ? "копий ещё нет"
+            : $"последняя копия: {at:dd.MM HH:mm}";
+        if (_backup.LastError is not null)
+            BackupState.Text += $" · не удалось обновить: {_backup.LastError}";
+        BackupState.Foreground = (Brush)FindResource(at is null ? "Warn" : "Ok");
+    }
+
+    private async void BackupNow_Click(object sender, RoutedEventArgs e)
+    {
+        BackupNow.IsEnabled = false;
+        BackupState.Text = "снимаю копию...";
+        BackupState.Foreground = (Brush)FindResource("Dim");
+        await _backup.RunAsync();
+        ShowBackupState();
+        BackupNow.IsEnabled = true;
+    }
+
+    private void OpenBackups_Click(object sender, RoutedEventArgs e)
+    {
+        System.IO.Directory.CreateDirectory(Backup.Folder);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Backup.Folder,
+            UseShellExecute = true,
+        });
     }
 
     private void Autostart_Click(object sender, RoutedEventArgs e)

@@ -50,6 +50,17 @@ internal static class Program
             // запущенную программу. Хуков не ставит и к брокеру не ходит,
             // поэтому запускать можно параллельно с работающим агентом.
             foreach (var line in ActiveWindow.Describe()) Console.WriteLine(line);
+
+            // Отдельно — вердикт по тому окну, что впереди прямо сейчас.
+            // Только для него известны два последних признака: занимает ли
+            // оно весь экран и сколько при этом берёт видеокарта.
+            using var gpu = new HardwareMonitor();
+            var (_, load, _, _) = gpu.Read();
+            var (name, _, verdict) = ActiveWindow.Current(load);
+            Console.WriteLine();
+            Console.WriteLine($"  впереди сейчас: {name} -> {verdict}"
+                              + $" (видеокарта {load?.ToString("0") ?? "?"}%)");
+            Console.WriteLine($"  исключения читаются из {Overrides.Path}");
             return 0;
         }
 
@@ -101,6 +112,13 @@ internal static class Program
         var lastHardware = DateTime.MinValue;
         var lastHeartbeat = DateTime.MinValue;
         var lastApp = "";
+        // Последняя известная загрузка видеокарты. Нужна разбору окна:
+        // полноэкранное окно с загруженной видеокартой — это игра, и это
+        // единственный признак, работающий для игры, поставленной куда
+        // попало. Берём последнее значение, а не свежее: читать датчики
+        // ради каждой проверки окна дорого, а за пару секунд загрузка
+        // видеокарты не меняется настолько, чтобы это меняло вывод.
+        double? lastGpuLoad = null;
         var lastTrack = "";
         var lastAudio = (bool?)null;
         var warnedAboutRights = false;
@@ -132,7 +150,7 @@ internal static class Program
 
                 // Активное окно — только на смену, а не по таймеру: иначе
                 // один и тот же топик перепубликовывался бы сотни раз в час.
-                var (process, _, category) = ActiveWindow.Current();
+                var (process, _, category) = ActiveWindow.Current(lastGpuLoad);
                 var appKey = $"{process}|{category}";
                 if (appKey != lastApp)
                 {
@@ -179,6 +197,7 @@ internal static class Program
                 {
                     lastHardware = now;
                     var (gpuTemp, gpuLoad, cpuTemp, cpuLoad) = hardware.Read();
+                    lastGpuLoad = gpuLoad;
                     await Publish(client, TopicHardware, JsonSerializer.Serialize(new
                     {
                         gpu_temp = gpuTemp,

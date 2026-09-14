@@ -221,6 +221,32 @@ public sealed class Board
         }
     }
 
+    /// <summary>
+    /// Скачать базу целиком. null — не отдалась.
+    ///
+    /// Плата собирает копию через механизм самой SQLite, а не копированием
+    /// файла: при включённом журнале WAL простое копирование ловит базу в
+    /// середине записи и даёт битый файл.
+    /// </summary>
+    public async Task<byte[]?> DownloadDatabaseAsync(CancellationToken token = default)
+    {
+        try
+        {
+            // Таймаут больше обычного: база собирается на слабом
+            // процессоре и уезжает по Wi-Fi, четырёх секунд ей мало.
+            using var slow = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            var bytes = await slow.GetByteArrayAsync(Url("/db"), token);
+            LastError = null;
+            return bytes;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            LastError = Explain(error);
+            return null;
+        }
+    }
+
     // ------------------------------------------------------------ разбор
     // Плата имеет право прислать null в любом поле: датчик мог не успеть
     // прогреться, агент — не запуститься. Поэтому всё читается мягко и

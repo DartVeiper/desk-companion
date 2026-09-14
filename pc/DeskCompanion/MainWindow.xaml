@@ -389,6 +389,23 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
+                            <TextBlock Text="КОПИИ БАЗЫ" Style="{StaticResource CardTitle}"/>
+                            <TextBlock x:Name="BackupState" Style="{StaticResource Body}"
+                                       Text="копий ещё нет"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button x:Name="BackupNow" Content="Снять копию сейчас"
+                                        Style="{StaticResource Flat}" Click="BackupNow_Click"/>
+                                <Button Content="Открыть папку" Style="{StaticResource Flat}"
+                                        Margin="10,0,0,0" Click="OpenBackups_Click"/>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,12,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="История измерений живёт на карте памяти блока в единственном экземпляре, а карта — расходник. Приложение забирает базу раз в сутки и хранит последние семь копий."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
                             <TextBlock Text="АГЕНТ" Style="{StaticResource CardTitle}"/>
                             <TextBlock x:Name="AgentState" Style="{StaticResource Body}"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
