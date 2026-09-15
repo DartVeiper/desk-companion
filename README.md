@@ -159,7 +159,7 @@ cd pc/DeskCompanion && dotnet publish -c Release -r win-x64
 Автозапуск обоих — один скрипт, от имени администратора:
 
 ```
-powershell -ExecutionPolicy Bypass -File pcutostart.ps1
+powershell -ExecutionPolicy Bypass -File pc\autostart.ps1
 ```
 
 Механики разные, и не от лени. Приложение — обычная пользовательская
