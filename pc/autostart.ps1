@@ -30,8 +30,13 @@ param([switch]$Remove)
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$agent = Join-Path $root "agent\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\DeskAgent.exe"
-$app = Join-Path $root "pc\DeskCompanion\bin\Release\net8.0-windows\win-x64\publish\DeskCompanion.exe"
+# Обе программы берём из папки, которую делает build.ps1. Раньше здесь были
+# пути внутрь bin\Release\...\publish — они рабочие, но привязаны к тому,
+# как dotnet раскладывает сборку: меняется версия цели, и автозапуск молча
+# начинает указывать в пустоту. Одна папка на виду этим не страдает.
+$out = Join-Path $root "Программа"
+$agent = Join-Path $out "DeskAgent.exe"
+$app = Join-Path $out "DeskCompanion.exe"
 
 $taskName = "DeskCompanion Agent"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
@@ -62,8 +67,7 @@ if (-not (Test-Admin)) {
 foreach ($path in @($agent, $app)) {
     if (-not (Test-Path $path)) {
         Write-Host "  Не найден: $path"
-        Write-Host "  Сначала собери:  cd agent; dotnet publish -c Release -r win-x64"
-        Write-Host "                   cd pc\DeskCompanion; dotnet publish -c Release -r win-x64"
+        Write-Host "  Сначала собери:  powershell -ExecutionPolicy Bypass -File pc\build.ps1"
         return
     }
 }

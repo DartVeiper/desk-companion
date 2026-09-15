@@ -23,6 +23,13 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Сжатие: 181 МБ превращаются в 76. Платим полусекундой на первом
+         запуске, когда рантайм распаковывается во временную папку; дальше
+         он оттуда и берётся. Для файла, который люди качают с гитхаба,
+         размен очевидный. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 

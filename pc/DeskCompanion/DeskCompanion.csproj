@@ -13,7 +13,27 @@
     <!-- Один файл при публикации: ставить приложение из десятка dll неудобно,
          а самораспаковка стоит полсекунды при первом запуске. -->
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
+    <!-- Самодостаточно: рантайм внутри exe.
+
+         Раньше здесь стояло false, и на машине разработчика это незаметно —
+         .NET там уже есть вместе с SDK. Скачавший же релиз получал вместо
+         окна системное сообщение «для запуска необходимо установить .NET
+         Desktop Runtime». То есть проверить это можно было только на чужом
+         компьютере, а именно чужие компьютеры и есть весь смысл релиза.
+
+         Цена — размер: 220 КБ превращаются в 68 МБ. Сжатие отыгрывает
+         обратно почти половину, а разовая загрузка в 68 МБ всё равно
+         дешевле, чем установка рантайма руками. -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- WPF тянет пять нативных библиотек (отрисовка, DirectX, перо). Без
+         этой строки они лягут рядом с exe отдельными файлами, и «один
+         файл» перестанет быть одним файлом ровно там, где это важно. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Без отладочных символов: в релизе .pdb никому не нужен, а рядом
+         с exe он выглядит как забытый мусор. -->
+    <DebugType>none</DebugType>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
