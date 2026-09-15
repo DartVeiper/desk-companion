@@ -34,6 +34,7 @@ class Director:
         night_style: str | None = None,
         night_from: int = 23,
         night_to: int = 7,
+        overlay_timeout: timedelta = timedelta(minutes=2),
     ) -> None:
         self.registry = registry
         self.ambient = ambient
@@ -46,6 +47,10 @@ class Director:
         self.night_style = night_style
         self.night_from = night_from
         self.night_to = night_to
+        #: Через сколько без единого нажатия накладка закрывается сама.
+        #: Страховка, а не удобство: любая накладка, из которой почему-либо
+        #: не выйти, перестаёт быть ловушкой через две минуты.
+        self.overlay_timeout = overlay_timeout
 
         self._ambient_screen: Screen | None = None
         self._ambient_prev: str | None = None
@@ -53,6 +58,11 @@ class Director:
         #: Когда человека видели в последний раз. Публично: это же нужно
         #: строке состояния и тестовой обвязке превью.
         self.last_seen = None
+        #: Когда последний раз что-то нажимали. Отдельно от last_seen, и это
+        #: существенно: last_seen обновляет ещё и радар, пока человек за
+        #: столом, — а именно сидящий за столом человек и застревал в
+        #: накладке. Таймаут должен считать нажатия, а не присутствие.
+        self.last_input = None
         #: Сколько миллисекунд держат кнопку прямо сейчас. Заполняет драйвер
         #: ввода, читает отрисовка, чтобы нарисовать полосу прогресса.
         self.held_ms: float | None = None
@@ -79,6 +89,16 @@ class Director:
         # оказался бы в будущем, и покой не включился бы уже никогда.
         if self.last_seen is None or state.now < self.last_seen:
             self.last_seen = state.now
+        if self.last_input is None or state.now < self.last_input:
+            self.last_input = state.now
+
+        # Накладка, в которой давно ничего не нажимали, закрывается сама.
+        # До проверки покоя, а не после: покой включается только при пустом
+        # стеке, и без этой строчки блок, оставшийся в подробностях, не
+        # уходил в покой никогда — даже когда в комнате никого нет.
+        if self._stack and state.now - self.last_input >= self.overlay_timeout:
+            self.close_overlays()
+
         if state.desk.presence:
             self.last_seen = state.now
             self._ambient_screen = None
@@ -122,6 +142,7 @@ class Director:
     def handle(self, event: InputEvent, state: State) -> None:
         # Любой ввод означает, что человек здесь, даже если радар не согласен.
         self.last_seen = state.now
+        self.last_input = state.now
         self.held_ms = None
 
         if self._ambient_screen is not None:
@@ -189,16 +210,23 @@ class Director:
             return
 
         if action in (Action.NEXT, Action.PREV):
-            # Вращение, которое экран не забрал себе, не делает ничего.
-            # Раньше оно перекидывало на соседнюю накладку: покрутив в
+            # Переключать соседние накладки вращением — право экрана, а не
+            # умолчание: раньше это было умолчанием, и, покрутив в
             # диагностике, человек оказывался в яркости, куда не собирался.
-            # Переключать соседей вращением — право экрана, а не умолчание.
             if getattr(top, "cycle_siblings", False):
                 siblings = self._parent_of_top().details
                 if len(siblings) > 1 and top in siblings:
                     i = siblings.index(top)
                     step = 1 if action is Action.NEXT else -1
                     self._stack[-1] = siblings[(i + step) % len(siblings)]
+                return
+            # А вот молчать нельзя. Здесь стоял пустой возврат, и это была
+            # ловушка: на экране подробностей ни свайп, ни вращение не
+            # делали ровно ничего. Тап в левую или правую треть тоже —
+            # он превращается в PREV/NEXT и приходил сюда же. Итого две
+            # трети экрана и вся крутилка были мертвы, и выглядело это
+            # намертво зависшим блоком.
+            self._stack.pop()
             return
 
         # Всё остальное поднимает на слой выше. Залипнуть нельзя.
@@ -263,4 +291,6 @@ def from_config(config: dict, registry: ScreenRegistry) -> Director:
         night_style=cfg.get("night_style"),
         night_from=cfg.get("night_from", 23),
         night_to=cfg.get("night_to", 7),
+        overlay_timeout=timedelta(
+            seconds=screens.get("overlay_timeout_seconds", 120)),
     )

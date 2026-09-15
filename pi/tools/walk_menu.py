@@ -105,6 +105,14 @@ def main() -> None:
         """Имя без выбранного пункта: перемещение курсора — не переход."""
         return name.split(" [")[0]
 
+    def parent_of(name: str) -> str | None:
+        """Та же стопка без верхней накладки. None — уже карусель."""
+        if "  >  " not in name:
+            return None
+        base, _, stack = name.partition("  >  ")
+        parts = stack.split(" > ")
+        return base if len(parts) == 1 else base + "  >  " + " > ".join(parts[:-1])
+
     for name in sorted(seen):
         out = edges.get(name, {})
         if out and all(target == name for target in out.values()):
@@ -119,6 +127,15 @@ def main() -> None:
                 continue  # курсор внутри экрана — так и надо
             if ">" not in here and ">" not in there:
                 continue  # листаем карусель — так и надо
+            if there == parent_of(here):
+                # Вращение в накладке, которая его себе не забрала,
+                # поднимает на уровень вверх. Раньше правило было
+                # «не меняет экран вовсе», и эта проверка его закрепляла —
+                # вместе с ловушкой: на экране подробностей молчали и
+                # вращение, и свайп, и тап по краям, и выглядело это
+                # зависшим блоком. Наверх — можно, вбок к соседней
+                # накладке — по-прежнему сюрприз.
+                continue
             print(f"  [СЮРПРИЗ] {name}: {action} уводит с {here} на {there}")
             problems += 1
 

@@ -65,8 +65,13 @@ d, s = make()
 check("старт — карусель", d.current(s).name, "clock")
 tap(d, s, 95, 250)
 check("тап по карточке погоды", d.current(s).name, "weather_detail")
+# Здесь стояло «поворот в подробностях никуда не уводит», и проверка
+# честно закрепляла ловушку как правильное поведение — потому она и
+# дожила до живого блока. Уводить в соседнюю накладку по-прежнему не
+# надо, а вот молчать нельзя: молчащий экран неотличим от зависшего.
 press(d, s, Action.NEXT)
-check("поворот в подробностях никуда не уводит", d.current(s).name, "weather_detail")
+check("поворот в подробностях возвращает в карусель", d.current(s).name, "clock")
+tap(d, s, 95, 250)
 press(d, s, Action.SELECT)
 check("нажатие закрывает", d.current(s).name, "clock")
 tap(d, s, 400, 250)
@@ -224,6 +229,67 @@ labels = [p[0] for p in s.problems()]
 check("отказы найдены", labels, ["питание", "нет сети", "нет CO2"])
 check("критичное первым", s.problems()[0][2], True)
 check("датчик — не критично", s.problems()[2][2], False)
+
+print("\nИз накладки всегда есть выход")
+
+# Ловушка, на которую он налетел: зашёл в подробности воздуха, и дальше
+# ни свайп, ни вращение, ни тап по краям не делали ничего. Выглядело
+# зависшим блоком, хотя цикл шёл своим чередом.
+d, s = make()
+d._stack = [d.registry.current.details[0]] if d.registry.current.details else []
+if d._stack:
+    check("зашли в подробности", d.in_overlay, True)
+    press(d, s, Action.NEXT)
+    check("вращение выводит из накладки", d.in_overlay, False)
+
+    d._stack = [d.registry.current.details[0]]
+    press(d, s, Action.PREV)
+    check("вращение в другую сторону — тоже", d.in_overlay, False)
+
+    # Тап в левую треть превращается в PREV и приходил туда же, где
+    # молчало вращение: две трети экрана были мертвы.
+    d._stack = [d.registry.current.details[0]]
+    tap(d, s, 40, 200)
+    check("тап по краю выводит из накладки", d.in_overlay, False)
+
+# Настройки вращение забирают себе — их выводить нельзя, иначе значение
+# не покрутить.
+d, s = make()
+press(d, s, Action.SETTINGS)
+check("настройки открылись", d.in_overlay, True)
+press(d, s, Action.NEXT)
+check("в настройках вращение остаётся внутри", d.in_overlay, True)
+
+# Страховка по времени. Считаем нажатия, а не присутствие: застревал
+# именно сидящий за столом человек, и радар всё это время подтверждал,
+# что он здесь.
+d, s = make()
+press(d, s, Action.SETTINGS)
+check("накладка открыта", d.in_overlay, True)
+s.now = s.now + timedelta(minutes=1)
+d.current(s)
+check("через минуту ещё открыта", d.in_overlay, True)
+s.now = s.now + timedelta(minutes=2)
+d.current(s)
+check("через три закрылась сама", d.in_overlay, False)
+
+d, s = make()
+press(d, s, Action.SETTINGS)
+s.now = s.now + timedelta(minutes=1, seconds=50)
+d.current(s)
+press(d, s, Action.SELECT if d.in_overlay else Action.NEXT)
+s.now = s.now + timedelta(minutes=1)
+d.current(s)
+check("нажатие продлевает накладку", d.overlay_names != [], True)
+
+# И главное следствие: из накладки блок теперь уходит в покой. Раньше
+# покой включался только при пустом стеке, то есть застрявший блок не
+# возвращался сам никогда.
+d, s = make()
+press(d, s, Action.SETTINGS)
+absent(s, 10)
+d.current(s)
+check("оставленная накладка отпускает в покой", d.in_ambient, True)
 
 print(f"\n  провалов: {failed}")
 raise SystemExit(1 if failed else 0)
