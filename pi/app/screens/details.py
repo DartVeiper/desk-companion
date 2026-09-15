@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+from .. import lang
 from .. import theme
 from ..sources.desk import EnvTrendSource
 from . import weather_icons as icons
@@ -28,7 +29,13 @@ class WeatherDetail(DetailScreen):
         # Город в заголовке, когда он назван. Без него «+12, пасмурно» — это
         # погода неизвестно где: собравший себе такой же блок первым делом
         # хочет убедиться, что видит свою погоду, а не чужую.
-        w.header(draw, width, f"Погода — {out.place}" if out.place else "Погода за окном",
+        # Подставляем город после перевода, а не до: переводится подпись
+        # «Погода — », а название города остаётся как есть. Иначе Ржев,
+        # совпавший со словарной строкой, однажды превратился бы в чужое
+        # слово.
+        w.header(draw, width,
+                 lang.t("Погода — {}").format(out.place) if out.place
+                 else "Погода за окном",
                  dot=theme.ACCENT, home=True)
 
         if out.temp is None:
@@ -55,7 +62,8 @@ class WeatherDetail(DetailScreen):
         if out.rain_soon_minutes is not None:
             box = (238, 74, width - w.PAD, 178)
             w.card(draw, box, (22, 38, 58))
-            draw.text(((box[0] + box[2]) / 2, box[1] + 38), f"{out.rain_soon_minutes} мин",
+            draw.text(((box[0] + box[2]) / 2, box[1] + 38),
+                      lang.t("{} мин").format(out.rain_soon_minutes),
                       font=theme.font(42, bold=True), fill=theme.ACCENT, anchor="mm")
             draw.text(((box[0] + box[2]) / 2, box[3] - 26), "до дождя",
                       font=theme.font(theme.SMALL), fill=theme.DIM, anchor="mm")
@@ -74,9 +82,9 @@ class WeatherDetail(DetailScreen):
             w.stat_card(draw, boxes[0], "—", "в комнате")
         else:
             w.stat_card(draw, boxes[0], f"{room:.1f}°",
-                        f"в комнате, на {room - out.temp:.0f}° теплее"
+                        lang.t("в комнате, на {:.0f}° теплее").format(room - out.temp)
                         if room >= out.temp else
-                        f"в комнате, на {out.temp - room:.0f}° холоднее")
+                        lang.t("в комнате, на {:.0f}° холоднее").format(out.temp - room))
         w.stat_card(draw, boxes[1], state.now.strftime("%H:%M"), "данные на")
 
 
@@ -118,7 +126,8 @@ class AirDetail(DetailScreen):
             # Подпись над графиком, а не под ним: под ним живёт вердикт
             # крупным шрифтом, и «пора проветрить» её перекрывало.
             draw.text((246, 46),
-                      f"{EnvTrendSource.HOURS} ч · {min(env.trend)}-{max(env.trend)}",
+                      lang.t("{} ч · {}-{}").format(
+                          EnvTrendSource.HOURS, min(env.trend), max(env.trend)),
                       font=theme.font(theme.TINY), fill=theme.DIM, anchor="lm")
             w.sparkline(draw, (246, 60, width - theme.PAD, 100), env.trend,
                         theme.co2_color(env.co2))

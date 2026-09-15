@@ -210,6 +210,18 @@ public sealed class Board
                                                 CancellationToken token = default)
         => PostSettingsAsync(new { touch_sensitivity = value }, token);
 
+    /// <summary>Язык надписей на экране блока: "ru" или "en".</summary>
+    public async Task<string?> LanguageAsync(CancellationToken token = default)
+    {
+        using var doc = await GetAsync("/api/settings", token);
+        if (doc is null) return null;
+        if (!doc.RootElement.TryGetProperty("values", out var values)) return null;
+        return Str(values, "language");
+    }
+
+    public Task<bool> SaveLanguageAsync(string code, CancellationToken token = default)
+        => PostSettingsAsync(new { language = code }, token);
+
     /// <summary>Город, для которого блок показывает погоду.</summary>
     public async Task<Place?> CityAsync(CancellationToken token = default)
     {

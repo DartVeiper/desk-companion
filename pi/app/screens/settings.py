@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+from .. import lang
 from .. import theme
 from ..inputs.events import Action
 from ..state import State
@@ -74,12 +75,13 @@ class DiagnosticsScreen(DetailScreen):
             ("SCD41", "отвечает" if h.scd41_ok else "молчит", h.scd41_ok),
             ("LD2410", "отвечает" if h.ld2410_ok else "молчит", h.ld2410_ok),
             ("питание", "просадки" if h.throttled else "норма", not h.throttled),
-            ("карта", f"{h.disk_free_pct:.0f}% свободно", h.disk_free_pct >= 10),
+            ("карта", lang.t("{:.0f}% свободно").format(h.disk_free_pct),
+             h.disk_free_pct >= 10),
             ("темп. Pi", "—" if h.cpu_temp is None else f"{h.cpu_temp:.0f}°",
              h.cpu_temp is None or h.cpu_temp < 75),
             ("аптайм", w.duration(h.uptime_seconds), True),
             ("память", "—" if not h.ram_total_mb
-             else f"{h.ram_used_mb} из {h.ram_total_mb} МБ",
+             else lang.t("{} из {} МБ").format(h.ram_used_mb, h.ram_total_mb),
              not h.ram_total_mb or h.ram_used_mb < h.ram_total_mb * 0.85),
             ("версия", h.version or "—", bool(h.version)),
             ("сбои ввода", str(h.input_rejected), h.input_rejected < 200),

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+from .. import lang
 from .. import theme
 
 Box = tuple[float, float, float, float]
@@ -31,7 +32,10 @@ def status_badge(draw: ImageDraw.ImageDraw, width: int, state) -> float:
 
     label, _, critical = problems[0]
     if len(problems) > 1:
-        label += f"  +{len(problems) - 1}"
+        # Переводим название отказа до того, как приписали «+2»: с хвостом
+        # эта строка в словаре не найдётся, а отказов бывает от одного до
+        # всех сразу.
+        label = lang.t(label) + f"  +{len(problems) - 1}"
     color = theme.ALERT if critical else theme.WARN
 
     font = theme.font(theme.TINY, bold=True)
@@ -262,6 +266,10 @@ def ellipsize(draw: ImageDraw.ImageDraw, text: str, max_width: float, font) -> s
     с метелью» под карточкой ужалась бы до нечитаемой. Лучше честно
     показать начало и дать понять, что дальше есть ещё.
     """
+    # Переводим до обрезки, а не после. Иначе резали бы русский текст по
+    # русской ширине, а на экран шёл бы огрызок, которого нет ни в одном
+    # словаре, — то есть по-русски при выбранном английском.
+    text = lang.t(text)
     if draw.textlength(text, font=font) <= max_width:
         return text
     cut = text
@@ -277,7 +285,9 @@ def wrap(draw: ImageDraw.ImageDraw, text: str, max_width: float, font,
     Последняя строка при нехватке места обрезается многоточием — иначе
     длинное объяснение молча уезжает за край экрана.
     """
-    words, lines, line = text.split(), [], ""
+    # По той же причине, что в ellipsize: переносить надо уже переведённое,
+    # иначе строки ломаются по словам чужого языка.
+    words, lines, line = lang.t(text).split(), [], ""
     for word in words:
         probe = f"{line} {word}".strip()
         if draw.textlength(probe, font=font) <= max_width or not line:
@@ -347,6 +357,10 @@ def fit_font(
     Подписи приходят разной длины («Занят» против «Не беспокоить»), и
     подбирать размер на глаз под самую длинную — значит мельчить все.
     """
+    # Размер подбираем под ту надпись, которую покажем: у «Не беспокоить» и
+    # «Do not disturb» ширина разная, и подобранный по русской версии шрифт
+    # на английской вылез бы за край.
+    text = lang.t(text)
     while size > min_size:
         font = theme.font(size, bold=bold)
         if draw.textlength(text, font=font) <= max_width:
@@ -389,14 +403,19 @@ def empty_state(draw: ImageDraw.ImageDraw, width: int, height: int, text: str, h
 
 
 def duration(seconds: float) -> str:
-    """Длительность коротко: 2ч 15м, 45м, 30с."""
+    """Длительность коротко: 2ч 15м, 45м, 30с.
+
+    Буквы единиц переводятся здесь, а не словарём готовой строки: «2ч 15м»
+    собирается из чисел, и в словаре такую не найти — там пришлось бы
+    держать все возможные длительности.
+    """
     seconds = max(0, int(seconds))
     if seconds < 60:
-        return f"{seconds}с"
+        return lang.t("{}с").format(seconds)
     minutes = seconds // 60
     if minutes < 60:
-        return f"{minutes}м"
+        return lang.t("{}м").format(minutes)
     hours, minutes = divmod(minutes, 60)
     if hours < 24:
-        return f"{hours}ч {minutes:02d}м"
-    return f"{hours // 24}д {hours % 24}ч"
+        return lang.t("{}ч {:02d}м").format(hours, minutes)
+    return lang.t("{}д {}ч").format(hours // 24, hours % 24)

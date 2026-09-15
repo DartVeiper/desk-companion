@@ -51,6 +51,8 @@ ALLOWED = {
     "location.lat": float,
     "location.lon": float,
     "location.name": str,
+    #: Язык надписей на экране блока: "ru" или "en".
+    "ui.language": str,
 }
 
 #: Пороги CO2 живут здесь, а не в theme.py: их естественно крутить под свою

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+from .. import lang
 from .. import theme
 from ..draw_utils import clock_face, dot_matrix, hand, smooth
 from ..state import State
@@ -88,7 +89,7 @@ class BigDigitsAmbient(AmbientScreen):
         )
         line = state.now.strftime("%d.%m")
         if state.weather.temp is not None:
-            line += f"   ·   на улице {state.weather.temp:+.0f}°"
+            line += lang.t("   ·   на улице {:+.0f}°").format(state.weather.temp)
         draw.text((w // 2, 262), line, font=theme.font(theme.BODY), fill=theme.DIM, anchor="mm")
 
 

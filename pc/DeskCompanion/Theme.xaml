@@ -183,6 +183,45 @@
         </Setter>
     </Style>
 
+    <!-- Переключатель. По той же причине, что галочка и ползунок: без
+         стиля берётся системный, светлый и из другой эпохи. Ключа нет —
+         применяется ко всем, кроме тех, у кого стиль задан явно (кнопки
+         слева живут на NavButton). -->
+    <Style TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Grid Width="16" Height="16" VerticalAlignment="Center">
+                            <Ellipse x:Name="Ring" Stroke="{StaticResource Line}"
+                                     StrokeThickness="1.5" Fill="Transparent"/>
+                            <Ellipse x:Name="Dot" Width="8" Height="8"
+                                     Fill="{StaticResource Accent}" Visibility="Collapsed"/>
+                        </Grid>
+                        <ContentPresenter Margin="9,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Ring" Property="Stroke"
+                                    Value="{StaticResource Accent}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Ring" Property="Stroke"
+                                    Value="{StaticResource Accent}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource Dim}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Галочка. Стандартная в WPF светлая и с рамкой из времён Windows 7:
          на тёмном фоне она выглядит вырезанной из другой программы. -->
     <Style TargetType="CheckBox">

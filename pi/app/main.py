@@ -29,6 +29,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 from app import director as director_mod  # noqa: E402
+from app import lang  # noqa: E402
 from app import theme  # noqa: E402
 from app.display.base import Display  # noqa: E402
 from app.display.preview import PreviewDisplay  # noqa: E402
@@ -259,12 +260,24 @@ class Application:
     def _build_screens(self) -> None:
         """Собрать карусель и покой с учётом настроек из браузера."""
         config = settings_mod.apply(registry_mod.load_config(self.config_path))
+        self._apply_language(config)
         registry = registry_mod.ScreenRegistry(
             [registry_mod.instantiate(e) for e in config["screens"]["enabled"]],
         )
         self.director = director_mod.from_config(config, registry)
         self._apply_touch(config)
         self._apply_location(config)
+
+    def _apply_language(self, config: dict) -> None:
+        """Выбрать язык надписей.
+
+        Перед сборкой экранов, а не после: часть подписей экраны считают
+        при создании, и язык должен быть выбран раньше.
+        """
+        chosen = config.get("ui", {}).get("language", "ru")
+        if chosen != lang.current():
+            lang.use(chosen)
+            print(f"  язык экрана: {lang.current()}")
 
     def _apply_location(self, config: dict) -> None:
         """Донести выбранный город до источника погоды.
@@ -455,7 +468,10 @@ class Application:
     def _render(self, screen) -> None:
         started = time.monotonic()
         frame = Image.new("RGB", (self.display.width, self.display.height), theme.BG)
-        screen.render(self.state, ImageDraw.Draw(frame), frame)
+        # Единственное место, где текст экрана попадает под перевод. Экраны
+        # про язык не знают вовсе — см. app/lang.py, там объяснено, почему
+        # так, а не обёрткой вокруг каждой строки.
+        screen.render(self.state, lang.wrap(ImageDraw.Draw(frame)), frame)
         # Полоса прогресса удержания поверх любого экрана. Без неё три
         # секунды до настроек приходится отсчитывать вслепую, и промах
         # выглядит как «работает через раз».

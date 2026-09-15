@@ -118,6 +118,7 @@ public partial class MainWindow : Window
         {
             await RefreshScreensAsync();
             await RefreshTouchAsync();
+            await RefreshLanguageAsync();
             await RefreshCityAsync();
             ShowBackupState();
         };
@@ -611,6 +612,42 @@ public partial class MainWindow : Window
     {
         _settings.StartMinimized = MinimizedBox.IsChecked == true;
         _settings.Save();
+    }
+
+    // ------------------------------------------------ язык надписей блока
+
+    //: Пока язык не приехал с блока, переключатель трогать нечему: любое
+    //: его положение было бы выдумкой, и первый же щелчок отправил бы эту
+    //: выдумку на плату.
+    private bool _langKnown;
+
+    private async Task RefreshLanguageAsync()
+    {
+        var code = await _board.LanguageAsync();
+        if (code is null)
+        {
+            LangState.Text = _board.LastError ?? "блок не ответил";
+            return;
+        }
+        _langKnown = false;
+        LangRu.IsChecked = code != "en";
+        LangEn.IsChecked = code == "en";
+        _langKnown = true;
+        LangRu.IsEnabled = LangEn.IsEnabled = true;
+        LangState.Text = code == "en" ? "сейчас English" : "сейчас русский";
+    }
+
+    private async void Language_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_langKnown) return;
+        if ((sender as FrameworkElement)?.Tag as string is not { } code) return;
+
+        LangState.Text = "переключаю…";
+        var ok = await _board.SaveLanguageAsync(code);
+        LangState.Text = ok
+            ? (code == "en" ? "сейчас English" : "сейчас русский")
+            : _board.LastError ?? "не сохранилось";
+        if (!ok) await RefreshLanguageAsync();
     }
 
     // ----------------------------------------------------- город погоды

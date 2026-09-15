@@ -25,6 +25,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app import lang  # noqa: E402
 from app import theme  # noqa: E402
 from app.screens import registry as registry_mod  # noqa: E402
 from app import forecast
@@ -143,6 +144,12 @@ def states() -> list[tuple[str, State]]:
 
 def main() -> None:
     render = "--render" in sys.argv
+    # Английский проверять обязательно отдельно: слова другой длины,
+    # и подпись, влезавшая по-русски, может уехать за край.
+    #     py tools/check_layout.py --en
+    if "--en" in sys.argv:
+        lang.use("en")
+        print("\n  язык: английский")
     config = registry_mod.load_config(CONFIG)
 
     entries = list(config["screens"]["enabled"])
@@ -168,7 +175,9 @@ def main() -> None:
             frame = Image.new("RGB", (theme.WIDTH, theme.HEIGHT), theme.BG)
             draw = Recorder(frame)
             try:
-                screen.render(state, draw, frame)
+                # Через ту же обёртку, что и на устройстве: иначе на
+                # английском проверялась бы русская вёрстка, то есть ничего.
+                screen.render(state, lang.wrap(draw), frame)
             except Exception as exc:  # noqa: BLE001
                 print(f"  [ПАДЕНИЕ] {screen.name} / {label}: "
                       f"{type(exc).__name__}: {exc}")

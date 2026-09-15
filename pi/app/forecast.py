@@ -60,7 +60,13 @@ class Part:
 
     @property
     def title(self) -> str:
-        return self.label if self.day == "сегодня" else f"завтра {self.label}"
+        from . import lang
+
+        # Часть суток и слово «завтра» переводим по отдельности: в
+        # английском порядок другой — «tomorrow evening», а не
+        # «evening tomorrow», — и шаблон это учитывает.
+        part = lang.t(self.label)
+        return part if self.day == "сегодня" else lang.t("завтра {}").format(part)
 
 
 def _part_of(hour: int) -> tuple[str, int, int]:

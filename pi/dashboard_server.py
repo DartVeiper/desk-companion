@@ -165,6 +165,7 @@ def api_settings() -> dict:
             # умолчанию, написанное в двух местах, однажды разойдётся, и
             # ползунок начнёт показывать не то, что стоит на самом деле.
             "touch_sensitivity": config["touch"]["max_resistance"],
+            "language": config.get("ui", {}).get("language", "ru"),
             "city_name": config.get("location", {}).get("name", ""),
             "city_lat": config.get("location", {}).get("lat"),
             "city_lon": config.get("location", {}).get("lon"),
@@ -197,6 +198,12 @@ def save_settings(payload: dict) -> dict:
                       ("touch_sensitivity", "touch.max_resistance")):
         if key in payload:
             values[name] = payload[key]
+
+    # Язык — только из известных. Неизвестный код означал бы экран, на
+    # котором не найдено ни одной строки, то есть молча русский вид при
+    # выбранном «эсперанто»; лучше не принять вовсе.
+    if payload.get("language") in ("ru", "en"):
+        values["ui.language"] = payload["language"]
 
     # Город — тройкой или никак. Разъехавшиеся название и координаты хуже
     # отсутствия города: на экране будет написан один, а погода показана
@@ -674,6 +681,16 @@ async function settingsTab(){
       <p class=muted>Меньше двух минут на уход в покой ставить не стоит: радар
       периодически теряет неподвижного человека, и экран начнёт дёргаться.</p></div>
 
+    <div class=card><h2>Язык надписей на блоке</h2>
+      <div class=row><label>язык</label>
+        <select name="language" id="language">
+          <option value="ru"${v.language === 'en' ? '' : ' selected'}>Русский</option>
+          <option value="en"${v.language === 'en' ? ' selected' : ''}>English</option>
+        </select></div>
+      <p class=muted>Меняет только надписи на экране блока. Названия окон,
+      треков и сетей остаются как есть — это чужой текст, а не наш
+      интерфейс.</p></div>
+
     <div class=card><h2>Чувствительность экрана</h2>
       ${num('touch_sensitivity','нажатие',2000,15000,500,'')}
       <p class=muted>Вправо — легче нажимать. Панель резистивная: она меряет
@@ -696,6 +713,7 @@ async function settingsTab(){
     const payload = {screens: pick('screens'), ambient: pick('ambient')};
     document.querySelectorAll('#settings input[type=range]')
       .forEach(i => payload[i.name] = +i.value);
+    payload.language = document.getElementById('language').value;
     await fetch('/api/settings', {method:'POST', body: JSON.stringify(payload)});
     // Сервис сам заметит правку файла и пересоберёт экраны — перезапускать
     // его не нужно.

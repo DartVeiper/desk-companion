@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+from .. import lang
 from .. import theme
 from ..state import State
 from ..stats import WINDOW_HOURS
@@ -27,9 +28,13 @@ _MONTHS = (
 
 
 def date_text(state: State) -> str:
-    return (
-        f"{_WEEKDAYS[state.now.weekday()]}, "
-        f"{state.now.day} {_MONTHS[state.now.month - 1]}"
+    # День недели и месяц переводим по отдельности, а собранную строку —
+    # шаблоном: «воскресенье, 13 сентября» в словаре не найти, таких строк
+    # было бы триста шестьдесят шесть.
+    return lang.t("{}, {} {}").format(
+        lang.t(_WEEKDAYS[state.now.weekday()]),
+        state.now.day,
+        lang.t(_MONTHS[state.now.month - 1]),
     )
 
 
@@ -52,7 +57,7 @@ def status(state: State) -> tuple[str, tuple[int, int, int]]:
 
     minutes = state.desk.sitting_minutes(state.now)
     if minutes >= WINDOW_HOURS * 60:
-        return f"{minutes // 60} ч без перерыва", theme.WARN
+        return lang.t("{} ч без перерыва").format(minutes // 60), theme.WARN
     return "за столом", theme.OK
 
 
@@ -61,7 +66,8 @@ def cells(state: State) -> list[tuple[str, str, tuple[int, int, int]]]:
     # Подпись всегда называет место. Иначе «облачно» под числом читается
     # как показание датчика, а не как погода за окном.
     weather_caption = f"на улице  {out.cond}" if out.cond else "на улице"
-    room_caption = "в комнате" if env.humidity is None else f"в комнате  {env.humidity:.0f}%"
+    room_caption = ("в комнате" if env.humidity is None
+                    else lang.t("в комнате  {:.0f}%").format(env.humidity))
     return [
         ("--" if out.temp is None else f"{out.temp:+.0f}°",
          weather_caption, theme.DIM if out.temp is None else theme.FG),
@@ -149,7 +155,7 @@ class ClockScreen(Screen):
 
         rain = state.weather.rain_soon_minutes
         if rain is not None:
-            warning = f"дождь через {rain} мин"
+            warning = lang.t("дождь через {} мин").format(rain)
             tiny = theme.font(theme.TINY)
             draw.text((width - theme.PAD, 176), warning, font=tiny,
                       fill=theme.ACCENT, anchor="rm")

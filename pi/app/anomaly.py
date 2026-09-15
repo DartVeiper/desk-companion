@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from . import lang
 from .db import Database
 from .stats import BREAK_MINUTES
 
@@ -135,7 +136,7 @@ def explain(window: Window, reference: list[Window], limit: int = 2) -> str:
     ничего не подсказывает (п.10 требует, чтобы причина была).
     """
     if not reference:
-        return "нет с чем сравнивать"
+        return lang.t("нет с чем сравнивать")
 
     scored = []
     for field, high, low in _PHRASES:
@@ -147,13 +148,17 @@ def explain(window: Window, reference: list[Window], limit: int = 2) -> str:
         deviation = (getattr(window, field) - centre) / spread
         phrase = high if deviation > 0 else low
         if phrase and abs(deviation) >= 2:
-            scored.append((abs(deviation), phrase.format(value=getattr(window, field))))
+            scored.append((abs(deviation),
+                           lang.t(phrase).format(value=getattr(window, field))))
 
     if window.hour < 6 or window.hour >= 23:
-        scored.append((99, "ночное время"))  # само по себе достаточный повод
+        scored.append((99, lang.t("ночное время")))  # само по себе достаточный повод
 
     scored.sort(reverse=True)
-    return ", ".join(text for _, text in scored[:limit]) or "непохоже на обычную сессию"
+    # Переводим куски до склейки: собранной фразы в словаре нет и быть не
+    # может — сочетаний слишком много.
+    return (", ".join(text for _, text in scored[:limit])
+            or lang.t("непохоже на обычную сессию"))
 
 
 class AnomalyModel:

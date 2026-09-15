@@ -14,6 +14,7 @@ from datetime import timedelta
 
 from PIL import Image, ImageDraw
 
+from .. import lang
 from .. import theme
 from ..inputs.events import Action
 from ..state import State
@@ -63,8 +64,8 @@ class ManualScreen(Screen):
 
         left = ""
         if state.desk.manual_until:
-            left = "сброс через " + w.duration(
-                (state.desk.manual_until - state.now).total_seconds())
+            left = lang.t("сброс через {}").format(w.duration(
+                (state.desk.manual_until - state.now).total_seconds()))
         w.header(draw, width, self.title, left or None,
                  theme.WARN if active else theme.DIM, state=state)
 
