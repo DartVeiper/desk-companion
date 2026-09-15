@@ -210,6 +210,28 @@ public sealed class Board
                                                 CancellationToken token = default)
         => PostSettingsAsync(new { touch_sensitivity = value }, token);
 
+    /// <summary>Город, для которого блок показывает погоду.</summary>
+    public async Task<Place?> CityAsync(CancellationToken token = default)
+    {
+        using var doc = await GetAsync("/api/settings", token);
+        if (doc is null) return null;
+        if (!doc.RootElement.TryGetProperty("values", out var values)) return null;
+        if (!values.TryGetProperty("city_lat", out var lat) ||
+            !values.TryGetProperty("city_lon", out var lon)) return null;
+        if (lat.ValueKind != JsonValueKind.Number || lon.ValueKind != JsonValueKind.Number)
+            return null;
+        return new Place(Str(values, "city_name") ?? "", "", lat.GetDouble(), lon.GetDouble());
+    }
+
+    public Task<bool> SaveCityAsync(Place place, CancellationToken token = default)
+        => PostSettingsAsync(new
+        {
+            // Тройкой, а не тремя отдельными полями: название без координат
+            // или наоборот — это подписанный на экране город, для которого
+            // показана чужая погода.
+            city = new { name = place.Name, lat = place.Latitude, lon = place.Longitude },
+        }, token);
+
     /// <summary>
     /// Сохранить состав и порядок экранов.
     ///

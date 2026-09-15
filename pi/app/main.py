@@ -264,6 +264,29 @@ class Application:
         )
         self.director = director_mod.from_config(config, registry)
         self._apply_touch(config)
+        self._apply_location(config)
+
+    def _apply_location(self, config: dict) -> None:
+        """Донести выбранный город до источника погоды.
+
+        Со спросом сразу, а не в свой черёд: между опросами погоды пятнадцать
+        минут, и человек, выбравший город, четверть часа смотрел бы на погоду
+        в прежнем — решив, что выбор не сработал.
+        """
+        block = config.get("location", {})
+        lat, lon = block.get("lat"), block.get("lon")
+        if lat is None or lon is None:
+            return
+
+        self.state.weather.place = str(block.get("name", "") or "")
+        for source in self.sources:
+            if getattr(source, "name", "") != "weather":
+                continue
+            if source.latitude == float(lat) and source.longitude == float(lon):
+                continue
+            source.latitude, source.longitude = float(lat), float(lon)
+            source._next_at = 0.0
+            print(f"  город для погоды: {self.state.weather.place or f'{lat}, {lon}'}")
 
     def _apply_touch(self, config: dict) -> None:
         """Донести порог нажатия до панели, не пересобирая железо.
@@ -516,7 +539,10 @@ def location(args) -> tuple[float | None, float | None]:
         return args.lat, args.lon
     try:
         from app.screens.registry import load_config
-        block = load_config(CONFIG).get("location", {})
+        # С наложенными настройками: город выбирается из приложения, и без
+        # этого при старте бралось бы значение из репозитория, а на
+        # выбранное блок переезжал бы только при первой правке настроек.
+        block = settings_mod.apply(load_config(CONFIG)).get("location", {})
         return block.get("lat"), block.get("lon")
     except Exception:  # noqa: BLE001
         return None, None

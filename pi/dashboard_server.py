@@ -165,6 +165,9 @@ def api_settings() -> dict:
             # умолчанию, написанное в двух местах, однажды разойдётся, и
             # ползунок начнёт показывать не то, что стоит на самом деле.
             "touch_sensitivity": config["touch"]["max_resistance"],
+            "city_name": config.get("location", {}).get("name", ""),
+            "city_lat": config.get("location", {}).get("lat"),
+            "city_lon": config.get("location", {}).get("lon"),
         },
     }
 
@@ -194,6 +197,19 @@ def save_settings(payload: dict) -> dict:
                       ("touch_sensitivity", "touch.max_resistance")):
         if key in payload:
             values[name] = payload[key]
+
+    # Город — тройкой или никак. Разъехавшиеся название и координаты хуже
+    # отсутствия города: на экране будет написан один, а погода показана
+    # для другого, и понять это нельзя ничем.
+    city = payload.get("city")
+    if isinstance(city, dict) and {"name", "lat", "lon"} <= set(city):
+        try:
+            values["location.lat"] = float(city["lat"])
+            values["location.lon"] = float(city["lon"])
+            values["location.name"] = str(city["name"])
+        except (TypeError, ValueError):
+            pass
+
     settings.save(values)
     return api_settings()
 

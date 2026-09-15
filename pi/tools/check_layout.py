@@ -76,6 +76,10 @@ def states() -> list[tuple[str, State]]:
     full.env.updated = now
     full.weather.temp, full.weather.cond = -17.4, "сильный снегопад с метелью"
     full.weather.rain_soon_minutes = 35
+    # Город теперь выбирается поиском по всем населённым пунктам мира, так
+    # что в заголовок может приехать что угодно. Берём не длиннейшее на
+    # планете, а честно длинное из тех, что человек правда выберет.
+    full.weather.place = "Белгород-Днестровский"
     full.pc.last_heartbeat = now
     full.pc.active_app, full.pc.category = "Visual Studio Code — часы", "code"
     full.pc.keystrokes, full.pc.mouse_clicks = 18432, 9765

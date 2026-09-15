@@ -173,8 +173,8 @@
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              PreviewMouseLeftButtonDown="ScreenList_MouseDown"
                              PreviewMouseMove="ScreenList_MouseMove"
-                             Drop="ScreenList_Drop" DragOver="ScreenList_DragOver"
-                             AllowDrop="True">
+                             PreviewMouseLeftButtonUp="ScreenList_MouseUp"
+                             LostMouseCapture="ScreenList_LostCapture">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -368,6 +368,66 @@
                                        Text="Имя deskpi.local из Windows находится через раз — если связи нет, впиши адрес цифрами, его видно в веб-интерфейсе роутера."/>
                             <TextBlock x:Name="TestResult" Style="{StaticResource Caption}"
                                        Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="ГОРОД ДЛЯ ПОГОДЫ" Style="{StaticResource CardTitle}"/>
+                            <TextBlock x:Name="CityNow" Style="{StaticResource Body}"
+                                       Margin="0,2,0,0" Text="жду блок"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBox x:Name="CityBox" Width="300" FontSize="13"
+                                         KeyDown="CityBox_KeyDown"/>
+                                <Button Content="Найти" Style="{StaticResource Flat}"
+                                        Margin="10,0,0,0" Click="CityFind_Click"/>
+                            </StackPanel>
+                            <TextBlock x:Name="CityNote" Style="{StaticResource Caption}"
+                                       Margin="0,8,0,0" TextWrapping="Wrap"
+                                       Text="Впиши название и нажми «Найти» — ищется по всем населённым пунктам мира, не по списку крупных городов."/>
+                            <ListBox x:Name="CityList" Background="Transparent" BorderThickness="0"
+                                     MaxHeight="190" Margin="0,8,0,0" Visibility="Collapsed"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     MouseDoubleClick="CityPick_Click">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="Row" Background="Transparent"
+                                                            CornerRadius="6" Margin="0,1" Padding="9,7">
+                                                        <ContentPresenter/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="Row" Property="Background" Value="#FF1E232C"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="Row" Property="Background" Value="#FF232A35"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontSize="13"
+                                                       Foreground="{StaticResource Fg}"/>
+                                            <TextBlock Text="{Binding Where}" FontSize="11"
+                                                       Foreground="{StaticResource Dim}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <Button x:Name="CityApply" Content="Поставить на блок"
+                                    Style="{StaticResource Flat}" HorizontalAlignment="Left"
+                                    Margin="0,10,0,0" IsEnabled="False" Click="CityPick_Click"/>
                         </StackPanel>
                     </Border>
 

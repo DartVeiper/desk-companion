@@ -25,7 +25,11 @@ class WeatherDetail(DetailScreen):
     def render(self, state: State, draw: ImageDraw.ImageDraw, frame: Image.Image) -> None:
         width, height = frame.size
         out = state.weather
-        w.header(draw, width, "Погода за окном", dot=theme.ACCENT, home=True)
+        # Город в заголовке, когда он назван. Без него «+12, пасмурно» — это
+        # погода неизвестно где: собравший себе такой же блок первым делом
+        # хочет убедиться, что видит свою погоду, а не чужую.
+        w.header(draw, width, f"Погода — {out.place}" if out.place else "Погода за окном",
+                 dot=theme.ACCENT, home=True)
 
         if out.temp is None:
             w.empty_state(draw, width, height, "Нет данных",

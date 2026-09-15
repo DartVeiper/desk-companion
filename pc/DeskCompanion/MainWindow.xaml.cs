@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using DeskCompanion.Services;
 
 namespace DeskCompanion;
@@ -117,6 +118,7 @@ public partial class MainWindow : Window
         {
             await RefreshScreensAsync();
             await RefreshTouchAsync();
+            await RefreshCityAsync();
             ShowBackupState();
         };
     }
@@ -131,6 +133,13 @@ public partial class MainWindow : Window
 
     // --------------------------------------------------------- навигация
 
+    /// <summary>
+    /// Анимировать ли переходы. Режим снимка выключает: он рисует окно
+    /// сразу после переключения страницы, и на картинку попала бы
+    /// наполовину проявившаяся страница.
+    /// </summary>
+    public bool Animated { get; set; } = true;
+
     private void Nav_Checked(object sender, RoutedEventArgs e)
     {
         if (PageOverview is null) return;  // ещё не собрано окно
@@ -139,6 +148,43 @@ public partial class MainWindow : Window
         PageScreens.Visibility = tag == "1" ? Visibility.Visible : Visibility.Collapsed;
         PageStats.Visibility = tag == "2" ? Visibility.Visible : Visibility.Collapsed;
         PageSettings.Visibility = tag == "3" ? Visibility.Visible : Visibility.Collapsed;
+
+        FrameworkElement shown = tag switch
+        {
+            "1" => PageScreens,
+            "2" => PageStats,
+            "3" => PageSettings,
+            _ => PageOverview,
+        };
+        Appear(shown);
+    }
+
+    /// <summary>
+    /// Проявить страницу: короткое всплытие снизу вверх.
+    ///
+    /// Смысл не в украшении. Мгновенная подмена содержимого не говорит, что
+    /// произошло: страницы похожи по строению, и на полкадра непонятно,
+    /// сменилась она или просто перерисовалась. Движение снизу отвечает на
+    /// это без единого слова.
+    /// </summary>
+    private void Appear(FrameworkElement page)
+    {
+        if (!Animated)
+        {
+            page.Opacity = 1;
+            page.RenderTransform = Transform.Identity;
+            return;
+        }
+
+        var shift = new TranslateTransform();
+        page.RenderTransform = shift;
+        page.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(130)));
+        shift.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(10, 0, TimeSpan.FromMilliseconds(190))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
     }
 
     // ------------------------------------------------------- обновление
@@ -328,40 +374,169 @@ public partial class MainWindow : Window
     private async void ReloadScreens_Click(object sender, RoutedEventArgs e)
         => await RefreshScreensAsync();
 
-    // Перетаскивание строк. Жест начинается не по нажатию, а после того как
-    // палец увёл мышь дальше системного порога, — иначе обычный клик по
-    // галочке превращался бы в перетаскивание.
+    // ------------------------------------------------ перетаскивание строк
+
+    /// <summary>
+    /// Перетаскивание сделано вручную, а не через DragDrop.DoDragDrop.
+    ///
+    /// Системное перетаскивание не анимируется в принципе: оно рисует свой
+    /// курсор, а список под ним стоит неподвижно и перестраивается разом в
+    /// момент отпускания. Строка не едет за мышью, соседи не расступаются,
+    /// и понять, куда именно встанет строка, можно только отпустив её.
+    ///
+    /// Здесь строка поднимается, едет ровно за курсором, а остальные
+    /// разъезжаются на её место по ходу — то есть видно результат до того,
+    /// как отпустил.
+    /// </summary>
+    private ScreenRow? _dragRow;
+
+    //: За какое место строки взялись. Без этого строка прыгала бы верхним
+    //: краем под курсор в момент захвата.
+    private double _grabOffset;
+    private bool _dragging;
+
+    private const double SlideMs = 150;
+
+    private ListBoxItem? Container(ScreenRow row)
+        => ScreenList.ItemContainerGenerator.ContainerFromItem(row) as ListBoxItem;
+
+    private static TranslateTransform Shift(ListBoxItem item)
+    {
+        if (item.RenderTransform is TranslateTransform existing) return existing;
+        var made = new TranslateTransform();
+        item.RenderTransform = made;
+        return made;
+    }
+
+    /// <summary>Где строка лежала бы без сдвига — то есть по вёрстке.</summary>
+    private double LayoutTop(ListBoxItem item)
+    {
+        var y = item.TranslatePoint(new Point(0, 0), ScreenList).Y;
+        return item.RenderTransform is TranslateTransform t ? y - t.Y : y;
+    }
+
+    private static void SlideTo(ListBoxItem item, double from, double to)
+    {
+        var shift = Shift(item);
+        shift.Y = from;
+        shift.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(SlideMs))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
+    }
+
     private void ScreenList_MouseDown(object sender, MouseButtonEventArgs e)
-        => _dragStart = e.GetPosition(null);
+    {
+        _dragStart = e.GetPosition(ScreenList);
+        _dragRow = FindRow(e.OriginalSource as DependencyObject);
+    }
 
     private void ScreenList_MouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed) return;
-        var moved = e.GetPosition(null) - _dragStart;
-        if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(moved.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        if (e.LeftButton != MouseButtonState.Pressed) { EndDrag(); return; }
+        if (_dragRow is null) return;
 
-        if (FindRow(e.OriginalSource as DependencyObject) is not { } row) return;
-        DragDrop.DoDragDrop(ScreenList, row, DragDropEffects.Move);
+        var point = e.GetPosition(ScreenList);
+
+        if (!_dragging)
+        {
+            // Порог обязателен: без него клик по галочке превращался бы в
+            // перетаскивание, и галочку стало бы не поставить.
+            if (Math.Abs(point.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+                return;
+            if (Container(_dragRow) is not { } start) return;
+            _grabOffset = _dragStart.Y - LayoutTop(start);
+            _dragging = true;
+            // Поверх остальных и чуть прозрачнее — чтобы было видно, что
+            // строку держат в руке, а не что список просто перерисовался.
+            Panel.SetZIndex(start, 1);
+            start.Opacity = 0.9;
+            // Захват мыши обязателен: без него, уведя курсор за край списка,
+            // человек теряет строку на полпути — события просто перестают
+            // приходить, а строка остаётся висеть поднятой.
+            ScreenList.CaptureMouse();
+        }
+
+        if (Container(_dragRow) is not { } item) return;
+
+        // Едет точно за курсором: анимацию сдвига снимаем, иначе она будет
+        // спорить с мышью за одно и то же свойство.
+        var shift = Shift(item);
+        shift.BeginAnimation(TranslateTransform.YProperty, null);
+        shift.Y = point.Y - _grabOffset - LayoutTop(item);
+
+        var over = IndexAt(point.Y);
+        var here = _screens.IndexOf(_dragRow);
+        if (over >= 0 && over != here) Reorder(here, over);
     }
 
-    private void ScreenList_DragOver(object sender, DragEventArgs e)
+    /// <summary>Над какой строкой курсор. -1 — ни над какой.</summary>
+    private int IndexAt(double y)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(ScreenRow))
-            ? DragDropEffects.Move : DragDropEffects.None;
-        e.Handled = true;
+        for (var i = 0; i < _screens.Count; i++)
+        {
+            if (ReferenceEquals(_screens[i], _dragRow)) continue;
+            if (Container(_screens[i]) is not { } item) continue;
+            var top = LayoutTop(item);
+            if (y >= top && y <= top + item.ActualHeight) return i;
+        }
+        return -1;
     }
 
-    private void ScreenList_Drop(object sender, DragEventArgs e)
+    /// <summary>
+    /// Переставить строку и развезти остальные по новым местам плавно.
+    ///
+    /// Приём известный: запоминаем, где строки были, переставляем, меряем,
+    /// где стали, и сдвигаем каждую обратно на разницу — а потом гасим этот
+    /// сдвиг анимацией. Вёрстка при этом мгновенная и настоящая, едет
+    /// только картинка.
+    /// </summary>
+    private void Reorder(int from, int to)
     {
-        if (e.Data.GetData(typeof(ScreenRow)) is not ScreenRow dragged) return;
-        var target = FindRow(e.OriginalSource as DependencyObject);
-        if (target is null || ReferenceEquals(target, dragged)) return;
+        var was = new Dictionary<ScreenRow, double>();
+        foreach (var row in _screens)
+            if (Container(row) is { } item) was[row] = LayoutTop(item);
 
-        _screens.Move(_screens.IndexOf(dragged), _screens.IndexOf(target));
+        _screens.Move(from, to);
         Renumber();
+        ScreenList.UpdateLayout();
+
+        foreach (var row in _screens)
+        {
+            // Перетаскиваемой правит мышь, её трогать нельзя.
+            if (ReferenceEquals(row, _dragRow)) continue;
+            if (Container(row) is not { } item) continue;
+            if (!was.TryGetValue(row, out var before)) continue;
+            var delta = before - LayoutTop(item);
+            if (Math.Abs(delta) > 0.5) SlideTo(item, delta, 0);
+        }
+
         SaveScreens.IsEnabled = true;
         ScreensNote.Text = "порядок изменён — нажми «Применить на блоке»";
+    }
+
+    private void ScreenList_MouseUp(object sender, MouseButtonEventArgs e) => EndDrag();
+
+    private void ScreenList_LostCapture(object sender, MouseEventArgs e) => EndDrag();
+
+    private void EndDrag()
+    {
+        var row = _dragRow;
+        _dragRow = null;
+        if (!_dragging) return;
+        _dragging = false;
+
+        if (row is not null && Container(row) is { } item)
+        {
+            // Доезжает до места, а не телепортируется: отпущенная строка
+            // должна догнать своих, иначе конец жеста выглядит обрывом.
+            var shift = Shift(item);
+            SlideTo(item, shift.Y, 0);
+            item.Opacity = 1.0;
+            Panel.SetZIndex(item, 0);
+        }
+        if (ScreenList.IsMouseCaptured) ScreenList.ReleaseMouseCapture();
     }
 
     private static ScreenRow? FindRow(DependencyObject? source)
@@ -436,6 +611,76 @@ public partial class MainWindow : Window
     {
         _settings.StartMinimized = MinimizedBox.IsChecked == true;
         _settings.Save();
+    }
+
+    // ----------------------------------------------------- город погоды
+
+    private readonly Geocoder _geocoder = new();
+
+    private async Task RefreshCityAsync()
+    {
+        var place = await _board.CityAsync();
+        CityNow.Text = place is null
+            ? _board.LastError ?? "блок не ответил"
+            : string.IsNullOrEmpty(place.Name)
+                ? $"{place.Latitude:0.00}, {place.Longitude:0.00} — город не назван"
+                : place.Name;
+    }
+
+    private void CityBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) CityFind_Click(sender, e);
+    }
+
+    private async void CityFind_Click(object sender, RoutedEventArgs e)
+    {
+        var query = CityBox.Text.Trim();
+        if (query.Length < 2)
+        {
+            CityNote.Text = "нужно хотя бы две буквы";
+            return;
+        }
+
+        CityNote.Text = "ищу…";
+        CityList.Visibility = Visibility.Collapsed;
+        CityApply.IsEnabled = false;
+
+        var found = await _geocoder.SearchAsync(query);
+        if (found.Count == 0)
+        {
+            CityNote.Text = _geocoder.LastError ?? $"ничего не нашлось по запросу «{query}»";
+            return;
+        }
+
+        CityList.ItemsSource = found;
+        CityList.SelectedIndex = 0;
+        CityList.Visibility = Visibility.Visible;
+        CityApply.IsEnabled = true;
+        // Тёзок много: без страны и области выбор был бы гаданием, поэтому
+        // и говорим, сколько их, а не молча подставляем первый.
+        CityNote.Text = found.Count == 1
+            ? "нашёлся один — проверь и поставь на блок"
+            : $"нашлось {found.Count}: выбери нужный, они бывают тёзками";
+    }
+
+    private async void CityPick_Click(object sender, RoutedEventArgs e)
+    {
+        if (CityList.SelectedItem is not Place place) return;
+
+        CityNote.Text = $"ставлю {place.Full}…";
+        CityApply.IsEnabled = false;
+        var ok = await _board.SaveCityAsync(place);
+        if (!ok)
+        {
+            CityNote.Text = _board.LastError ?? "не сохранилось";
+            CityApply.IsEnabled = true;
+            return;
+        }
+
+        CityNow.Text = place.Name;
+        CityList.Visibility = Visibility.Collapsed;
+        CityBox.Text = "";
+        CityNote.Text = "готово — блок запросит погоду сразу, не дожидаясь своего часа";
     }
 
     // ------------------------------------------- чувствительность экрана

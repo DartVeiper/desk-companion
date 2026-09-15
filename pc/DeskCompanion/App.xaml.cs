@@ -60,6 +60,10 @@ public partial class App : Application
             Top = -4000,
             ShowActivated = false,
             Opacity = 0,
+            // Без этого на картинку попадает страница, не успевшая
+            // проявиться: снимок делается сразу после переключения, а
+            // переход идёт две десятых секунды.
+            Animated = false,
         };
         window.Show();
         window.SelectPage(page);
