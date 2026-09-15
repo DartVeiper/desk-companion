@@ -42,6 +42,11 @@ def status(state: State) -> tuple[str, tuple[int, int, int]]:
     """
     if state.desk.manual_status:
         return state.desk.manual_status, theme.WARN
+    if not state.health.clock_synced:
+        # Пока NTP не ответил, на экране время прошлого выключения. Молчать
+        # об этом нельзя: в тот раз оно держалось тринадцать минут, и часы
+        # всё это время уверенно показывали полночь.
+        return "время не сверено", theme.WARN
     if not state.desk.presence:
         return "никого", theme.DIM
 

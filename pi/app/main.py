@@ -58,6 +58,11 @@ MIN_NAP = 0.005
 
 FULL_REFRESH_EVERY = 300.0
 
+#: Насколько настенные часы могут разойтись с секундомером, прежде чем
+#: считать, что время перевели. Секунда-другая набегает от неточности
+#: самого шага цикла; пять — это уже не дрейф, а скачок.
+CLOCK_JUMP_SECONDS = 5.0
+
 #: Потолок паузы между кадрами. Сама пауза считается по стоимости
 #: предыдущего кадра: полный кадр уходит по шине 175 мс, одна полоса — 30,
 #: и держать после дешёвой полосы паузу как после полного кадра незачем.
@@ -114,8 +119,22 @@ class Recorder:
         self._pending: tuple | None = None
         self._pending_since: datetime | None = None
 
+    def forget(self) -> None:
+        """Начать учёт заново — после того, как часы перевели."""
+        self._minute = None
+        self._env_at = None
+        self._last_event = None
+        self._pending = None
+        self._pending_since = None
+
     def tick(self, state: State) -> None:
         if self.storage is None:
+            return
+        if not state.health.clock_synced:
+            # До сверки по сети время — это момент прошлого выключения.
+            # Записанное сейчас уедет в прошлое: в ту ночь, когда блок
+            # стоял выключенным, у нас оказалось тринадцать минут
+            # активности и замер воздуха.
             return
         self._minute_row(state)
         self._env_row(state)
@@ -217,6 +236,10 @@ class Application:
         #: Счётчики цикла. Считаем всегда: на отладку их не хватало ровно
         #: тогда, когда она была нужна, а стоят они сложения в проходе.
         self.ticks = 0
+        #: Пара «что показывали часы» и «сколько тикал секундомер». По их
+        #: расхождению видно, что системное время перевели, — а на плате без
+        #: часов реального времени это происходит при каждой загрузке.
+        self._clock_seen: tuple[datetime, float] | None = None
         self._tick_seconds = 0.0
         self._last_counters = (0, 0, 0.0)
 
@@ -252,8 +275,34 @@ class Application:
             self.ticks += 1
             self._tick_seconds += time.monotonic() - entered
 
+    def _clock_jumped(self) -> bool:
+        """Системное время перевели между проходами цикла."""
+        mono = time.monotonic()
+        seen, self._clock_seen = self._clock_seen, (self.state.now, mono)
+        if seen is None:
+            return False
+        walked = (self.state.now - seen[0]).total_seconds()
+        ticked = mono - seen[1]
+        return abs(walked - ticked) > CLOCK_JUMP_SECONDS
+
+    def _forget_time(self) -> None:
+        """Забыть всё, что считалось от неверных часов.
+
+        Плата без часов реального времени стартует с временем прошлого
+        выключения и узнаёт настоящее только от NTP — через секунды, а то и
+        минуты. Всё, что сосчитано до этого, надо выбросить: иначе «сел за
+        стол в 00:09» после перевода часов превращается в шестнадцать часов
+        без перерыва, а история получает строки на ночь, которой не было.
+        """
+        self.state.desk.restart_sitting(self.state.now)
+        self.recorder.forget()
+        self.state.env.updated = None
+        print(f"  часы перевели на {self.state.now:%H:%M} — счётчики времени сброшены")
+
     def _tick(self) -> bool:
         self.state.now = self.clock()
+        if self._clock_jumped():
+            self._forget_time()
 
         dirty = self._reload_settings()
         for source in self.sources:

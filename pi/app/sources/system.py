@@ -28,6 +28,19 @@ def _read(path: str) -> str | None:
         return None
 
 
+def clock_synced() -> bool:
+    """Системные часы сверены по сети.
+
+    systemd-timesyncd создаёт этот файл, когда сверил часы. Каталога нет
+    вовсе — значит служба не используется (машина разработки), и спорить не
+    о чем: там часы идут от материнской платы и верны всегда.
+    """
+    marker = Path("/run/systemd/timesync/synchronized")
+    if not marker.parent.exists():
+        return True
+    return marker.exists()
+
+
 def cpu_temperature() -> float | None:
     raw = _read("/sys/class/thermal/thermal_zone0/temp")
     return round(int(raw) / 1000, 1) if raw and raw.isdigit() else None
@@ -140,6 +153,7 @@ class SystemHealthSource(Source):
         health.cpu_temp = cpu_temperature()
         health.uptime_seconds = int(uptime_seconds())
         health.throttled = throttled()
+        health.clock_synced = clock_synced()
         health.disk_free_pct = usage.free / usage.total * 100
         health.ip = local_ip()
         health.wifi_ssid = wifi_ssid()

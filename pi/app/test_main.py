@@ -27,6 +27,7 @@ from app import theme
 from app.screens import clock as clock_mod
 from app import radar_levels
 from app.sources.sensors import Ld2410Source, Scd41Source, TouchSource
+from app.stats import BREAK_MINUTES, WINDOW_HOURS
 
 failed = 0
 
@@ -108,6 +109,8 @@ with tempfile.TemporaryDirectory() as tmp:
     st = State(now=datetime(2026, 8, 19, 10, 0, 5))
     st.desk.presence = True
     st.pc.category = "code"
+    # Без сверенных часов запись не идёт вовсе — см. блок про перевод часов.
+    st.health.clock_synced = True
 
     rec.tick(st)
     check("первая неполная минута не пишется",
@@ -526,11 +529,59 @@ with tempfile.TemporaryDirectory() as tmp:
     check("битый файл не роняет, а даёт пустую",
           radar_levels.Levels.load(Path(tmp) / "битый.json").samples, 0)
 
+# Перевод часов. У Pi нет часов реального времени: при выключении время
+# запоминается, при включении восстанавливается, и сервис стартует раньше,
+# чем NTP ответит. Выключенный в полночь блок включается уверенным, что
+# сейчас полночь, — и всё, что он успеет сосчитать до сверки, врёт.
+
+print("\nПеревод часов")
+
+night = datetime(2026, 9, 15, 0, 9)
+moments = [night]
+jumped = Application(PreviewDisplay(), sources=[], clock=lambda: moments[-1])
+jumped.state.health.clock_synced = True
+jumped.state.desk.note_presence(True, night, BREAK_MINUTES)
+jumped.tick()
+check("до перевода счёт с полуночи", jumped.state.desk.sitting_since, night)
+
+# Часы перевели на вечер, а секундомер цикла почти не сдвинулся.
+moments.append(datetime(2026, 9, 15, 16, 0))
+jumped.tick()
+check("после перевода счёт начат заново",
+      jumped.state.desk.sitting_minutes(moments[-1]), 0)
+check("и время начала — новое", jumped.state.desk.sitting_since, moments[-1])
+
+# Обычный ход времени переводом не считается.
+moments.append(datetime(2026, 9, 15, 16, 0, 1))
+jumped.tick()
+check("секунда вперёд — не перевод",
+      jumped.state.desk.sitting_since, datetime(2026, 9, 15, 16, 0))
+
+# До сверки по сети история не пишется вовсе.
+with tempfile.TemporaryDirectory() as tmp:
+    early = Database(Path(tmp) / "early.db")
+    keeper = Recorder(early)
+    st = State(now=datetime(2026, 9, 15, 0, 9))
+    st.desk.presence = True
+    st.health.clock_synced = False
+    keeper.tick(st)
+    st.now = datetime(2026, 9, 15, 0, 10, 5)
+    keeper.tick(st)
+    check("часы не сверены — в базу ничего",
+          early.conn.execute("SELECT COUNT(*) c FROM activity_minute").fetchone()["c"], 0)
+
+    st.health.clock_synced = True
+    st.now = datetime(2026, 9, 15, 16, 0)
+    keeper.tick(st)
+    st.now = datetime(2026, 9, 15, 16, 1, 5)
+    keeper.tick(st)
+    check("после сверки записи пошли",
+          early.conn.execute("SELECT COUNT(*) c FROM activity_minute").fetchone()["c"], 1)
+    early.close()
+
 # Сколько человек сидит без перерыва. Считается отдельно от presence_since:
 # тот отвечает на вопрос «когда радар в последний раз передумал» и
 # сбрасывается от минутной отлучки к принтеру.
-
-from app.stats import BREAK_MINUTES, WINDOW_HOURS  # noqa: E402
 
 sat = State(now=datetime(2026, 9, 14, 10, 0))
 start = sat.now
@@ -562,12 +613,19 @@ check("ушёл — счёт остановлен",
 
 # Заголовок часов предупреждает, а не просто сообщает.
 warn = State(now=datetime(2026, 9, 14, 10, 0))
+warn.health.clock_synced = True
 warn.desk.note_presence(True, warn.now, BREAK_MINUTES)
 check("час за столом — обычный статус", clock_mod.status(warn)[0], "за столом")
 warn.now += timedelta(hours=WINDOW_HOURS)
 check("два часа — предупреждение", clock_mod.status(warn)[0],
       f"{WINDOW_HOURS} ч без перерыва")
 check("и цвет тревожный", clock_mod.status(warn)[1], theme.WARN)
+
+# Пока часы не сверены, экран говорит об этом, а не про стол: время на нём
+# в эти минуты — момент прошлого выключения.
+warn.health.clock_synced = False
+check("часы не сверены — говорим об этом", clock_mod.status(warn)[0],
+      "время не сверено")
 
 # Текущий трек. Топик приходит с признаком «сохранять», чтобы после
 # перезапуска блока музыка появилась сразу, не дожидаясь следующей песни.

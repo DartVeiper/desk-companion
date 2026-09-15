@@ -93,6 +93,7 @@ def states() -> list[tuple[str, State]]:
     # История CO2 для спарклайна: без неё ветка с графиком не рисуется
     # вовсе, и наезд подписи на вердикт проверка не видит.
     full.env.trend = [560 + (i * 7) % 340 for i in range(48)]
+    full.health.clock_synced = True
     full.desk.note_presence(True, now - timedelta(hours=3), 5)
     full.desk.manual_status = "не беспокоить"
     full.desk.manual_until = now + timedelta(hours=4, minutes=37)
