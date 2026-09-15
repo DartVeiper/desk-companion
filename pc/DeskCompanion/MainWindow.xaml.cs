@@ -79,6 +79,11 @@ public partial class MainWindow : Window
         HostBox.Text = settings.Host;
         PortBox.Text = settings.Port.ToString();
         AutostartBox.IsChecked = Settings.IsAutostartOn();
+        var agentTask = Settings.IsAgentAutostartOn();
+        AgentAutostart.Text = agentTask
+            ? "агент: автозапуск заведён"
+            : "агент: автозапуска нет — данные с компьютера пропадут после перезагрузки";
+        AgentAutostart.Foreground = (Brush)FindResource(agentTask ? "Ok" : "Warn");
         MinimizedBox.IsChecked = settings.StartMinimized;
         ScreenList.ItemsSource = _screens;
 

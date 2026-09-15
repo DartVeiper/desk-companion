@@ -77,6 +77,44 @@ public sealed class Settings
         catch (Exception) { return false; }
     }
 
+    //: Имя задачи планировщика, которой поднимается агент. Заводится
+    //: скриптом pc\autostart.ps1 — отсюда её только проверяем: создание
+    //: требует прав администратора, а приложение обычное.
+    public const string AgentTask = "DeskCompanion Agent";
+
+    /// <summary>
+    /// Заведён ли автозапуск агента.
+    ///
+    /// Агент идёт задачей планировщика, а не веткой Run, потому что ему
+    /// нужны права администратора: без них не читаются температуры. Через
+    /// Run это означало бы запрос UAC при каждом входе в систему, а на
+    /// такое человек соглашается ровно два раза.
+    /// </summary>
+    public static bool IsAgentAutostartOn()
+    {
+        try
+        {
+            var probe = new System.Diagnostics.ProcessStartInfo("schtasks",
+                $"/query /TN \"{AgentTask}\"")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var process = System.Diagnostics.Process.Start(probe);
+            if (process is null) return false;
+            process.WaitForExit(4000);
+            return process.HasExited && process.ExitCode == 0;
+        }
+        catch (Exception)
+        {
+            // Нет schtasks или его запретили — сказать нечего, и врать,
+            // что автозапуска нет, тоже неправильно.
+            return false;
+        }
+    }
+
     public static bool SetAutostart(bool on)
     {
         try

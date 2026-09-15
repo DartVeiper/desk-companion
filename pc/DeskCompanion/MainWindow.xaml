@@ -384,6 +384,11 @@
                             <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
                                        TextWrapping="Wrap"
                                        Text="Приложение ждёт блок само: пока его нет в сети, оно тихо висит в трее и подключается, как только тот появится."/>
+                            <TextBlock x:Name="AgentAutostart" Style="{StaticResource Body}"
+                                       Margin="0,14,0,0"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Агент поднимается задачей планировщика, а не обычным автозапуском: ему нужны права администратора, иначе не читаются температуры. Завести или снять — pc\autostart.ps1 от имени администратора."/>
                         </StackPanel>
                     </Border>
 
