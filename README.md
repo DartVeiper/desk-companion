@@ -2,7 +2,7 @@
 
 *[Русская версия](README.ru.md) — the original. This is a translation of it.*
 
-<img src="docs/демо.gif" width="480" alt="Screen carousel">
+<img src="docs/demo.gif" width="480" alt="Screen carousel">
 
 A desk device built on a Raspberry Pi Zero 2 W. It shows the time and the
 weather, watches the air in the room, knows whether you are at your desk,
@@ -16,7 +16,7 @@ with Python. Only debugged code goes to the board.
 
 ## What it does
 
-<img src="docs/все-экраны.png" width="760" alt="Every screen">
+<img src="docs/all-screens.png" width="760" alt="Every screen">
 
 | | |
 |---|---|
@@ -165,7 +165,9 @@ seventeen seconds after power-on.
 <img src="docs/приложение.png" width="720" alt="The app">
 
 `pc/DeskCompanion` is a .NET 8 window: overview, screen list, statistics,
-settings. It lives in the tray, waits for the device and picks it up the
+settings. Its own interface is Russian only so far — the device switches
+language, the app does not yet. A translation is
+[welcome](CONTRIBUTING.md). It lives in the tray, waits for the device and picks it up the
 moment it appears on the network.
 
 It deliberately has no counting logic of its own: the metrics and the screen

@@ -25,6 +25,8 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app import forecast  # noqa: E402
+from app import lang  # noqa: E402
 from app import theme  # noqa: E402
 from app.screens import registry  # noqa: E402
 from app.state import Env, State, Weather  # noqa: E402
@@ -46,6 +48,18 @@ def demo_state() -> State:
         weather=Weather(temp=14.6, cond="малооблачно", code=1, is_day=False),
     )
     state.weather.rain_soon_minutes = None
+    # Прогноз на вечер и завтра. Без него экран прогноза показывал
+    # «Прогноза нет» — то есть витрина проекта рекламировала отказ.
+    state.weather.ahead = [
+        forecast.Part("вечером", "сегодня", 14.0, 1, False),
+        forecast.Part("ночью", "завтра", 9.0, 3, False),
+        forecast.Part("утром", "завтра", 12.0, 61, True),
+    ]
+    # Часы сверены. Иначе в углу каждого кадра висело предупреждение
+    # «время не сверено»: у Pi нет часов реального времени, и по умолчанию
+    # блок честно не верит своим, пока не сверится по сети. На живом
+    # устройстве это длится секунды, а на картинке висело всегда.
+    state.health.clock_synced = True
 
     state.desk.presence = True
     state.desk.presence_since = now - timedelta(hours=1, minutes=12)
@@ -69,8 +83,10 @@ def frames() -> list[tuple[str, Image.Image]]:
     for entry in config["screens"]["enabled"]:
         screen = registry.instantiate(entry)
         image = Image.new("RGB", (theme.WIDTH, theme.HEIGHT), theme.BG)
-        screen.render(state, ImageDraw.Draw(image), image)
-        out.append((screen.title or screen.name, image))
+        # Через ту же обёртку, что на устройстве, иначе картинка
+        # показывала бы не то, что человек увидит на экране.
+        screen.render(state, lang.wrap(ImageDraw.Draw(image)), image)
+        out.append((lang.t(screen.title or screen.name), image))
     return out
 
 
@@ -93,6 +109,13 @@ def sheet(shots: list[tuple[str, Image.Image]]) -> Image.Image:
 
 
 def main() -> None:
+    # Английский набор кладём под латинскими именами, рядом с русским:
+    # на английскую страницу нужны английские скриншоты, иначе она выглядит
+    # недоделанной, а на русскую — русские.
+    #     py tools/render_demo.py --en
+    english = "--en" in sys.argv
+    if english:
+        lang.use("en")
     DOCS.mkdir(parents=True, exist_ok=True)
     shots = frames()
 
@@ -102,11 +125,11 @@ def main() -> None:
     palette = shots[0][1].convert("P", palette=Image.ADAPTIVE, colors=128)
     converted = [image.quantize(palette=palette, dither=Image.Dither.NONE)
                  for _, image in shots]
-    gif = DOCS / "демо.gif"
+    gif = DOCS / ("demo.gif" if english else "демо.gif")
     converted[0].save(gif, save_all=True, append_images=converted[1:],
                       duration=HOLD_MS, loop=0, optimize=True)
 
-    board = DOCS / "все-экраны.png"
+    board = DOCS / ("all-screens.png" if english else "все-экраны.png")
     sheet(shots).save(board)
 
     print(f"\n  {gif.name}  — {len(shots)} кадров, "
