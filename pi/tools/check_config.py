@@ -91,6 +91,36 @@ def written_by_calibration(tree: ast.AST) -> set[str]:
     return keys
 
 
+def catalog_keys() -> set[str]:
+    """Экраны, которые дашборд показывает в списке настроек.
+
+    Читаем SCREEN_CATALOG разбором, а не импортом: dashboard_server тянет
+    за собой базу и сервер, а проверка должна гоняться на голой машине.
+    """
+    source = ROOT / "dashboard_server.py"
+    try:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return set()
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if "SCREEN_CATALOG" not in names:
+            continue
+        if not isinstance(node.value, (ast.Tuple, ast.List)):
+            continue
+        keys = set()
+        for item in node.value.elts:
+            if isinstance(item, (ast.Tuple, ast.List)) and item.elts:
+                first = item.elts[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    keys.add(first.value)
+        return keys
+    return set()
+
+
 def read_keys(tree: ast.AST) -> set[str]:
     """Ключи, которые модуль читает из словаря настроек."""
     keys: set[str] = set()
@@ -162,6 +192,30 @@ def main() -> int:
             print(f"    {key}")
         print("\n    Через cfg[...] это падение при старте узла, через")
         print("    cfg.get(...) — молчаливое значение по умолчанию.")
+
+    # Третья сверка: экраны из конфига против списка в настройках. Экран,
+    # которого нет в каталоге дашборда, работает на устройстве, но не
+    # показывается в настройках — его нельзя ни выключить, ни переставить,
+    # и человек решает, что обновление его не привезло. Так случилось с
+    # прогнозом: он листался на плате и отсутствовал в списке.
+    catalog = catalog_keys()
+    screens = set(data.get("screens", {}).get("enabled", []))
+    if catalog:
+        missing_in_catalog = sorted(screens - catalog)
+        missing_in_config = sorted(catalog - screens)
+        if missing_in_catalog:
+            problems += len(missing_in_catalog)
+            print(f"\n  ЭКРАНЫ, КОТОРЫХ НЕТ В СПИСКЕ НАСТРОЕК ({len(missing_in_catalog)}):\n")
+            for key in missing_in_catalog:
+                print(f"    {key}")
+            print("\n    Листаются на устройстве, но в настройках их не видно:")
+            print("    добавь в SCREEN_CATALOG в dashboard_server.py.")
+        if missing_in_config:
+            problems += len(missing_in_config)
+            print(f"\n  ЭКРАНЫ ИЗ СПИСКА НАСТРОЕК, КОТОРЫХ НЕТ В КОНФИГЕ ({len(missing_in_config)}):\n")
+            for key in missing_in_config:
+                print(f"    {key}")
+            print("\n    В настройках их предлагают включить, а включать нечего.")
 
     if not problems:
         print("  настройки и код сходятся\n")

@@ -123,6 +123,7 @@ def api_live() -> dict:
 SCREEN_CATALOG = (
     ("clock.ClockScreen", "Часы и погода"),
     ("details.WeatherDetail", "Погода подробно"),
+    ("forecast.ForecastScreen", "Прогноз по частям суток"),
     ("details.AirDetail", "Воздух подробно"),
     ("activity.ActivityScreen", "Активность"),
     ("away.AwayScreen", "Меня нет"),
@@ -160,6 +161,10 @@ def api_settings() -> dict:
             "brightness": current.get("display.brightness", 100),
             "co2_warn": current.get("air.co2_warn", 800),
             "co2_alert": current.get("air.co2_alert", 1400),
+            # Умолчание берём из конфига, а не числом здесь: значение по
+            # умолчанию, написанное в двух местах, однажды разойдётся, и
+            # ползунок начнёт показывать не то, что стоит на самом деле.
+            "touch_sensitivity": config["touch"]["max_resistance"],
         },
     }
 
@@ -185,7 +190,8 @@ def save_settings(payload: dict) -> dict:
                       ("night_to", "ambient.night_to"),
                       ("brightness", "display.brightness"),
                       ("co2_warn", "air.co2_warn"),
-                      ("co2_alert", "air.co2_alert")):
+                      ("co2_alert", "air.co2_alert"),
+                      ("touch_sensitivity", "touch.max_resistance")):
         if key in payload:
             values[name] = payload[key]
     settings.save(values)
@@ -651,6 +657,15 @@ async function settingsTab(){
       ${num('co2_alert','CO2: красный от',1000,2000,50,' ppm')}
       <p class=muted>Меньше двух минут на уход в покой ставить не стоит: радар
       периодически теряет неподвижного человека, и экран начнёт дёргаться.</p></div>
+
+    <div class=card><h2>Чувствительность экрана</h2>
+      ${num('touch_sensitivity','нажатие',2000,15000,500,'')}
+      <p class=muted>Вправо — легче нажимать. Панель резистивная: она меряет
+      не касание, а насколько сильно прижались друг к другу два слоя, и
+      ползунок задаёт, с какого прижатия считать это нажатием.</p>
+      <p class=muted>Поднимать почти безопасно — у нетронутой панели ложных
+      срабатываний не возникает ни при каком пороге. Если всё же начало
+      нажиматься само, ведите влево.</p></div>
 
     <div class=btnrow><button id=save>Применить</button>
       <span id=saved class=muted></span></div>`;

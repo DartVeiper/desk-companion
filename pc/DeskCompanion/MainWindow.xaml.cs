@@ -107,9 +107,16 @@ public partial class MainWindow : Window
             if (IsVisible) Refresh();
         };
 
+        _touchSave.Tick += (_, _) =>
+        {
+            _touchSave.Stop();
+            SaveTouch();
+        };
+
         Loaded += async (_, _) =>
         {
             await RefreshScreensAsync();
+            await RefreshTouchAsync();
             ShowBackupState();
         };
     }
@@ -430,6 +437,79 @@ public partial class MainWindow : Window
         _settings.StartMinimized = MinimizedBox.IsChecked == true;
         _settings.Save();
     }
+
+    // ------------------------------------------- чувствительность экрана
+
+    //: Пока значение не приехало с блока, ползунок двигать нечему: любое
+    //: его положение было бы выдумкой, и первое же касание мышью отправило
+    //: бы эту выдумку на плату.
+    private bool _touchKnown;
+
+    /// <summary>
+    /// Отложенное сохранение. Ползунок за одно перетаскивание проходит
+    /// десятки значений, и слать каждое — значит завалить плату запросами
+    /// ради единственного, которое человек имел в виду: последнего.
+    /// </summary>
+    private readonly System.Windows.Threading.DispatcherTimer _touchSave = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(400),
+    };
+
+    private async Task RefreshTouchAsync()
+    {
+        var value = await _board.TouchSensitivityAsync();
+        if (value is null)
+        {
+            TouchState.Text = _board.LastError ?? "блок не ответил";
+            return;
+        }
+        // Ставим значение, не считая это правкой человека.
+        _touchKnown = false;
+        TouchSlider.Value = Math.Clamp(value.Value, TouchSlider.Minimum, TouchSlider.Maximum);
+        _touchKnown = true;
+        TouchSlider.IsEnabled = true;
+        TouchState.Text = Sensitivity(TouchSlider.Value);
+    }
+
+    private void TouchSlider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TouchState is null || !_touchKnown) return;
+        TouchState.Text = Sensitivity(e.NewValue);
+        // Отсчёт начинается заново с каждым движением: сохранится то, на
+        // чём человек остановился, а не то, через что он проехал.
+        _touchSave.Stop();
+        _touchSave.Start();
+    }
+
+    /// <summary>Отпустили мышь — ждать нечего, шлём сразу.</summary>
+    private void TouchSlider_Done(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        if (!_touchKnown) return;
+        _touchSave.Stop();
+        SaveTouch();
+    }
+
+    private async void SaveTouch()
+    {
+        var value = (int)Math.Round(TouchSlider.Value);
+        TouchState.Text = $"{Sensitivity(value)} — сохраняю";
+        var ok = await _board.SaveTouchSensitivityAsync(value);
+        TouchState.Text = ok
+            ? $"{Sensitivity(value)} — готово, попробуй нажать"
+            : _board.LastError ?? "не сохранилось";
+    }
+
+    /// <summary>
+    /// Словами, а не числом. Число здесь — порог сопротивления в омах, и
+    /// человеку оно не говорит ничего: важно, сильно ли надо давить.
+    /// </summary>
+    private static string Sensitivity(double value) => value switch
+    {
+        < 4000 => "нажимать туго",
+        < 7000 => "обычное нажатие",
+        < 11000 => "лёгкое нажатие",
+        _ => "самое лёгкое",
+    };
 
     // ------------------------------------------------------------ мелочи
 

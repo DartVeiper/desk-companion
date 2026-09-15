@@ -6,12 +6,12 @@ enabled = [
     "clock.ClockScreen",        # 1. Часы + погода
     "details.WeatherDetail",    # 2. Погода подробно
     "forecast.ForecastScreen",  # 3. Прогноз по частям суток
-    "details.AirDetail",        # 3. Воздух подробно
-    "activity.ActivityScreen",  # 4. Активность
-    "away.AwayScreen",          # 3. Меня нет
-    "hardware.HardwareScreen",  # 5. GPU / CPU
-    "anomaly.AnomalyScreen",    # 6. ML-аномалия
-    "streak.StreakScreen",      # 7. Стрик привычек
+    "details.AirDetail",        # 4. Воздух подробно
+    "activity.ActivityScreen",  # 5. Активность
+    "away.AwayScreen",          # 6. Меня нет
+    "hardware.HardwareScreen",  # 7. GPU / CPU
+    "anomaly.AnomalyScreen",    # 8. ML-аномалия
+    "streak.StreakScreen",      # 9. Стрик привычек
 ]
 
 # Куда уводит долгое нажатие (0,7 с) с энкодера или с тача. В карусель

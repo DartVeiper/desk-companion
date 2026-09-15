@@ -782,6 +782,64 @@ with tempfile.TemporaryDirectory() as tmp:
     check("пины целы", merged["display"]["dc"], 25)
     check("исходный конфиг не испорчен", base["screens"]["enabled"], ["a", "b", "c"])
 
+print("\nЧувствительность тача: ползунок и калибровка")
+with tempfile.TemporaryDirectory() as tmp:
+    store = Path(tmp) / "settings.json"
+
+    settings_mod.save({"touch.max_resistance": 9000, "air.co2_warn": 900}, store)
+    touched = settings_mod.apply({"touch": {"max_resistance": 6000}},
+                                 settings_mod.load(store))
+    check("ползунок перекрывает конфиг", touched["touch"]["max_resistance"], 9000)
+
+    # Калибровка забывает ручное значение — иначе она печатала бы новый
+    # порог, а работал бы старый ползунок, и понять это было бы нечем.
+    left = settings_mod.forget(["touch.max_resistance"], store)
+    check("ползунок забыт", "touch.max_resistance" in left, False)
+    check("соседние настройки целы", left["air.co2_warn"], 900)
+    after = settings_mod.apply({"touch": {"max_resistance": 6000}},
+                               settings_mod.load(store))
+    check("после калибровки работает замер", after["touch"]["max_resistance"], 6000)
+
+    check("забыть несуществующее — не ошибка",
+          settings_mod.forget(["туда.сюда"], store)["air.co2_warn"], 900)
+    check("забыть при отсутствии файла — не ошибка",
+          settings_mod.forget(["что угодно"], Path(tmp) / "нет.json"),
+          dict(settings_mod.DEFAULTS))
+
+
+class FakePanel:
+    """Панель ровно в той части, которую трогает порог."""
+
+    def __init__(self) -> None:
+        self.max_resistance = 6000.0
+
+
+class FakeTouchSource(Source):
+    name = "touch"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.touch = FakePanel()
+
+    def poll(self, state: State) -> bool:
+        return False
+
+
+panel_app = Application(PreviewDisplay(), sources=[FakeTouchSource()], clock=clock)
+panel = panel_app.sources[0].touch
+panel_app._apply_touch({"touch": {"max_resistance": 11500}})
+check("порог доехал до панели", panel.max_resistance, 11500.0)
+# Главное в этой ручке: она действует сразу. Сервис пересобирает экраны по
+# времени правки файла и железо при этом не трогает — без явной передачи
+# порога ползунок работал бы только после перезагрузки блока.
+panel_app._apply_touch({"touch": {}})
+check("без значения порог не сбрасывается", panel.max_resistance, 11500.0)
+panel_app._apply_touch({})
+check("без раздела touch тоже не падает", panel.max_resistance, 11500.0)
+Application(PreviewDisplay(), sources=[], clock=clock)._apply_touch(
+    {"touch": {"max_resistance": 7000}})
+check("без тача вовсе — не падает", True, True)
+
 print("\nСнимок для дашборда")
 snap_state = State(now=datetime(2026, 8, 19, 12, 0))
 snap_state.desk.presence = True

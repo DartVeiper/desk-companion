@@ -263,6 +263,34 @@ class Application:
             [registry_mod.instantiate(e) for e in config["screens"]["enabled"]],
         )
         self.director = director_mod.from_config(config, registry)
+        self._apply_touch(config)
+
+    def _apply_touch(self, config: dict) -> None:
+        """Донести порог нажатия до панели, не пересобирая железо.
+
+        Драйвер читает порог один раз — когда создаётся, то есть при старте
+        сервиса. Без этой строчки ползунок чувствительности правил бы файл
+        и ровно ничего больше: нажимать легче стало бы только после
+        перезагрузки блока, и человек решил бы, что ручка сломана.
+
+        Ищем панель по утиному признаку, а не по классу источника: на
+        машине разработки тача нет вовсе, и импортировать ради проверки
+        типа модуль, которого там может не быть, — плохой размен.
+        """
+        threshold = config.get("touch", {}).get("max_resistance")
+        if threshold is None:
+            return
+        for source in self.sources:
+            panel = getattr(source, "touch", None)
+            if panel is None or not hasattr(panel, "max_resistance"):
+                continue
+            if panel.max_resistance != float(threshold):
+                # В журнал, потому что проверить ручку иначе нечем: её
+                # действие физическое, и «стало ли легче нажиматься» — это
+                # ощущение, а не наблюдение. Строка отвечает на вопрос,
+                # доехало ли значение до панели вообще.
+                print(f"  чувствительность тача: {threshold:.0f}")
+            panel.max_resistance = float(threshold)
 
     def _reload_settings(self) -> bool:
         """Перечитать настройки, если их правили из браузера.

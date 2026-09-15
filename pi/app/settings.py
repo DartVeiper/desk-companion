@@ -38,6 +38,11 @@ ALLOWED = {
     "display.brightness": int,
     "air.co2_warn": int,
     "air.co2_alert": int,
+    #: Сила нажатия, с которой панель считает касание состоявшимся. Ручка
+    #: здесь, а не только в калибровке, потому что правильного значения нет:
+    #: оно зависит от того, ногтем человек тыкает или подушечкой пальца, и
+    #: подбирается на ощупь, а не замером.
+    "touch.max_resistance": int,
 }
 
 #: Пороги CO2 живут здесь, а не в theme.py: их естественно крутить под свою
@@ -55,11 +60,7 @@ def load(path: Path | None = None) -> dict:
 
 
 def save(values: dict, path: Path | None = None) -> dict:
-    """Сохранить только разрешённое и только верных типов.
-
-    Через временный файл и переименование: иначе сервис однажды прочитает
-    наполовину записанный JSON.
-    """
+    """Сохранить только разрешённое и только верных типов."""
     path = path or DEFAULT_PATH
     clean = load(path)
     for key, value in values.items():
@@ -71,16 +72,50 @@ def save(values: dict, path: Path | None = None) -> dict:
         except (TypeError, ValueError):
             continue
 
+    _write(clean, path)
+    return clean
+
+
+def forget(keys: list[str], path: Path | None = None) -> dict:
+    """Убрать ручные значения, вернув ключи под власть конфига.
+
+    Нужно калибровкам. Они пишут замеры в calibration.toml, который лежит
+    слоем ниже этого файла, — и ручка, однажды сдвинутая человеком, молча
+    отменяла бы любую последующую калибровку. Человек при этом видел бы,
+    как калибровка печатает новое значение, и как оно не действует.
+
+    Правило простое: побеждает сделанное последним. Подвинул ползунок —
+    работает ползунок; откалибровал — ползунок забыт.
+
+    Читаем сырой файл, а не load(): тот подмешивает умолчания, и забывание
+    одного ключа записало бы в файл все остальные.
+    """
+    path = path or DEFAULT_PATH
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return dict(DEFAULTS)
+    for key in keys:
+        stored.pop(key, None)
+    _write(stored, path)
+    return load(path)
+
+
+def _write(values: dict, path: Path) -> None:
+    """Записать словарь целиком — через временный файл и переименование.
+
+    Иначе сервис однажды прочитает наполовину записанный JSON: он
+    перечитывает файл по времени правки, а правка не мгновенна.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as fh:
-            json.dump(clean, fh, ensure_ascii=False, indent=2)
+            json.dump(values, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
-    return clean
 
 
 def apply(config: dict, overrides: dict | None = None) -> dict:

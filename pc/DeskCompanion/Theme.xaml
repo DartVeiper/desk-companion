@@ -129,6 +129,60 @@
         </Setter>
     </Style>
 
+    <!-- Ползунок. По той же причине, что и галочка: стандартный в WPF — из
+         другой эпохи и другой палитры. Заодно дорожка слева от бегунка
+         подсвечивается: без этого на тёмном фоне не видно, в какую сторону
+         значение растёт. -->
+    <Style TargetType="Slider">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="IsMoveToPointEnabled" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid VerticalAlignment="Center">
+                        <Border Height="4" CornerRadius="2"
+                                Background="{StaticResource Line}"/>
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge"
+                                              Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Height="4" CornerRadius="2"
+                                                    Background="{StaticResource Accent}"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge"
+                                              Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Width="16" Height="16">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Ellipse Fill="{StaticResource Fg}"
+                                                     Stroke="{StaticResource Bg}"
+                                                     StrokeThickness="2"/>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Галочка. Стандартная в WPF светлая и с рамкой из времён Windows 7:
          на тёмном фоне она выглядит вырезанной из другой программы. -->
     <Style TargetType="CheckBox">

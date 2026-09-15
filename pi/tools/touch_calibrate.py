@@ -25,8 +25,12 @@
    нажатию, чем к середине, — лишняя чувствительность обходится дешевле,
    чем необходимость продавливать.
 
-Результат записывается прямо в `app/config.toml` — переписывать руками
-ничего не нужно.
+Результат записывается в `app/calibration.toml` — переписывать руками
+ничего не нужно. Отдельным файлом, а не в `config.toml`: тот приезжает
+вместе с кодом и при следующей доставке затёр бы замеры.
+
+Заодно сбрасывается ползунок чувствительности, если его двигали из
+приложения: он лежит слоем выше и иначе отменил бы эту калибровку.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _calibration  # noqa: E402
 import _service  # noqa: E402
 
+from app import settings  # noqa: E402
 from app import theme  # noqa: E402
 from app.drivers import xpt2046  # noqa: E402
 from app.screens.registry import load_config  # noqa: E402
@@ -113,6 +118,11 @@ def wait_press(panel: xpt2046.Xpt2046, floor: int) -> tuple[int, int, int, float
 
 def write_config(values: dict[str, object]) -> None:
     """Записать замеры в calibration.toml, поверх config.toml."""
+    # Ползунок чувствительности из приложения лежит слоем выше замеров и
+    # молча отменил бы всё, что мы сейчас намеряли: человек увидел бы, как
+    # калибровка печатает новое значение и как оно не действует. Побеждает
+    # сделанное последним, а последней сейчас была калибровка.
+    settings.forget(["touch.max_resistance"])
     _calibration.save(MEASURED, "touch", values, notes={
         "x_min":
             "Границы сырых значений АЦП этой панели. Подобраны\n"
@@ -216,7 +226,7 @@ def main() -> None:
     display.close()
     spi.close()
 
-    print("\n  Записано в app/config.toml. Осталось перезапустить сервис:")
+    print("\n  Записано в app/calibration.toml. Осталось перезапустить сервис:")
     print("      sudo systemctl restart desk-companion\n")
 
 

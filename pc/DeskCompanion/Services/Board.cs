@@ -192,19 +192,46 @@ public sealed class Board
     }
 
     /// <summary>
+    /// Насколько легко нажимается экран. null — плата не ответила.
+    ///
+    /// Число — порог сопротивления между слоями резистивной панели. Больше
+    /// значит легче: сопротивление обратно силе нажатия.
+    /// </summary>
+    public async Task<int?> TouchSensitivityAsync(CancellationToken token = default)
+    {
+        using var doc = await GetAsync("/api/settings", token);
+        if (doc is null) return null;
+        if (!doc.RootElement.TryGetProperty("values", out var values)) return null;
+        if (!values.TryGetProperty("touch_sensitivity", out var found)) return null;
+        return found.TryGetInt32(out var number) ? number : null;
+    }
+
+    public Task<bool> SaveTouchSensitivityAsync(int value,
+                                                CancellationToken token = default)
+        => PostSettingsAsync(new { touch_sensitivity = value }, token);
+
+    /// <summary>
     /// Сохранить состав и порядок экранов.
     ///
     /// Порядок в списке и есть порядок в карусели — блок принимает его как
     /// есть, поэтому перетаскивание строк мышью ничего дополнительно не
     /// кодирует.
+    ///
+    /// Шлём список включённых ключей, а не пары «ключ — включён». Раньше
+    /// здесь были пары, и плата на них падала: она разбирает список как
+    /// набор строк, а строку из словаря не составить. Кнопка «Применить»
+    /// при этом выглядела рабочей — приложение не показывало ничего, кроме
+    /// оборванного соединения, а настройки просто не менялись.
     /// </summary>
-    public async Task<bool> SaveScreensAsync(IEnumerable<ScreenEntry> screens,
-                                             CancellationToken token = default)
-    {
-        var payload = new
+    public Task<bool> SaveScreensAsync(IEnumerable<ScreenEntry> screens,
+                                       CancellationToken token = default)
+        => PostSettingsAsync(new
         {
-            screens = screens.Select(s => new { key = s.Key, on = s.On }).ToArray(),
-        };
+            screens = screens.Where(s => s.On).Select(s => s.Key).ToArray(),
+        }, token);
+
+    private async Task<bool> PostSettingsAsync(object payload, CancellationToken token)
+    {
         var body = new StringContent(JsonSerializer.Serialize(payload),
                                      Encoding.UTF8, "application/json");
         try
