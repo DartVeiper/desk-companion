@@ -1,285 +1,317 @@
 # Desk Companion
 
-<img src="docs/демо.gif" width="480" alt="Карусель экранов">
+*[Русская версия](README.ru.md) — the original. This is a translation of it.*
 
-Настольный блок на Raspberry Pi Zero 2 W. Показывает время и погоду, следит
-за воздухом в комнате, знает, сидите вы за столом или нет, и ведёт
-статистику работы за компьютером. Один корпус, один провод питания.
+<img src="docs/демо.gif" width="480" alt="Screen carousel">
 
-Всё рисуется и проверяется **без железа**: экраны собираются в браузере,
-датчики подменяются заглушками, 378 проверок гоняются на любой машине с
-Python. На плату уезжает уже отлаженное.
+A desk device built on a Raspberry Pi Zero 2 W. It shows the time and the
+weather, watches the air in the room, knows whether you are at your desk,
+and keeps track of what you do on your computer. One case, one power cable.
+
+Everything is drawn and tested **without the hardware**: screens render in a
+browser, sensors are replaced by stubs, and 378 checks run on any machine
+with Python. Only debugged code goes to the board.
 
 ---
 
-## Что он умеет
+## What it does
 
-<img src="docs/все-экраны.png" width="760" alt="Все экраны">
+<img src="docs/все-экраны.png" width="760" alt="Every screen">
 
 | | |
 |---|---|
-| **Часы и погода** | без секунд — экран перерисовывается раз в минуту, а не 60 раз. Прогноз дождя на полтора часа вперёд, без ключей и регистраций |
-| **Воздух** | CO2, температура, влажность. Шкала с порогами: когда пора проветрить, видно с другого конца комнаты |
-| **Присутствие** | радар 24 ГГц видит и неподвижного человека — не датчик движения, который гаснет, когда сидишь смирно |
-| **Активность за ПК** | нажатия, клики, активное окно, загрузка и температуры процессора и видеокарты |
-| **Что играет** | трек с компьютера — любой плеер, система сама собирает их в общий список |
-| **Стрик привычек** | сколько дней подряд удавалось не сидеть без перерыва дольше заданного |
-| **Поиск странного** | модель учится на вашей обычной неделе и отмечает непохожие сессии |
+| **Clock and weather** | no seconds — the screen redraws once a minute instead of sixty times. Rain forecast 90 minutes ahead, no API key, no sign-up |
+| **Air** | CO2, temperature, humidity. A scale with thresholds: you can see from across the room that it is time to open a window |
+| **Presence** | a 24 GHz radar sees a motionless person — not a PIR sensor that gives up the moment you sit still |
+| **Computer activity** | keystrokes, clicks, the active window, CPU and GPU load and temperatures |
+| **Now playing** | the track from your computer — any player, Windows collects them all into one list |
+| **Habit streak** | how many days in a row you managed not to sit longer than your limit without a break |
+| **Anomaly detection** | a model learns your ordinary week and flags the sessions that do not look like it |
 
-Управление — энкодером, пальцем по экрану или свайпом. Состав экранов и их
-порядок правятся мышкой в приложении или в браузере, без правки кода.
+Control is by rotary encoder, by touch, or by swipe. Which screens appear
+and in what order is set with the mouse — in the desktop app or in a
+browser, without touching the code.
 
-**Язык и город.** Надписи на блоке переключаются между русским и
-английским, город для погоды ищется по всем населённым пунктам мира — не по
-списку крупных городов, который всё равно не включал бы вашу деревню.
-И то и другое меняется из приложения, действует сразу и переживает
-обновление кода.
+**Language and location.** The device switches between Russian and English,
+and the weather city is searched across every populated place on Earth —
+not from a built-in list of major cities, which would not contain your
+village anyway. Both are changed from the app, take effect immediately, and
+survive a code update.
 
 ---
 
-## Что нужно купить
+## What to buy
 
-| Что | Зачем | Примечание |
+| What | For | Note |
 |---|---|---|
-| Raspberry Pi Zero 2 W | всё целиком | именно 2 W: нужен Wi-Fi и четыре ядра |
-| Экран 4″ ST7796S 480×320 SPI с тачем XPT2046 | дисплей | тач резистивный, работает и в перчатках |
-| LD2410 (или LD2410B/C) | присутствие | **не** HC-SR501: тот видит только движение |
-| SCD41 | CO2, температура, влажность | настоящий NDIR, а не «эквивалент CO2» |
-| KY-040 | энкодер с кнопкой | |
-| Гребёнка 2×20 PLD-40 | к Pi Zero её надо припаять | на Zero гребёнки нет |
-| Провода «мама-мама», microSD 8 ГБ+ | обвязка | класс A1 не обязателен, см. ниже |
-| Паяльник, флюс, припой | гребёнка и разветвители | |
+| Raspberry Pi Zero 2 W | everything | the **2 W** specifically: you need Wi-Fi and four cores |
+| 4″ ST7796S 480×320 SPI display with XPT2046 touch | the screen | resistive touch, works through gloves |
+| LD2410 (or LD2410B/C) | presence | **not** an HC-SR501: that one only sees motion |
+| SCD41 | CO2, temperature, humidity | a real NDIR sensor, not an "eCO2" estimate |
+| KY-040 | rotary encoder with a button | |
+| 2×20 header, PLD-40 | must be soldered onto the Pi Zero | the Zero ships without one |
+| Female-to-female jumpers, microSD 8 GB+ | wiring | class A1 is not required, see below |
+| Soldering iron, flux, solder | the header and the splitters | |
 
-Про карту: измерили свою на 16 ГБ без класса A1 — 285 операций записи в
-секунду при норме A1 в 500. Блок при этом пишет **три**. То есть класс не
-важен, важно чтобы карта была настоящая: подделок среди дешёвых больше,
-чем медленных.
+About the card: we measured ours — 16 GB, no A1 rating — at 285 random
+writes per second, against the 500 that A1 requires. The device performs
+**three**. So the speed class does not matter; what matters is that the card
+is genuine. Among cheap cards, counterfeits are more common than slow ones.
 
 ---
 
-## Как собрать
+## Building it
 
-Коротко — ниже. Подробно, с пайкой гребёнки, разбором «что если замкнул» и
-таблицей отказов по каждому узлу — [СБОРКА.md](СБОРКА.md).
+The short version is below. The long one — soldering the header, what to do
+if you bridged two pins, and a failure table for every module — is in
+[СБОРКА.md](СБОРКА.md) (Russian).
 
-### 1. Прошить карту
+### 1. Flash the card
 
-Raspberry Pi OS Lite, **64-битная**. В Imager открыть «Edit Settings» и
-задать имя, пользователя, SSH и **сеть 2,4 ГГц** — пятигигагерцевую Zero 2 W
-не видит.
+Raspberry Pi OS Lite, **64-bit**. In Imager, open "Edit Settings" and set
+the hostname, user, SSH, and a **2.4 GHz network** — the Zero 2 W cannot see
+5 GHz at all.
 
-### 2. Доставить код и настроить систему
+### 2. Deliver the code and set up the system
 
 ```bash
 bash deploy.sh alex@192.168.1.42
 ```
 
-Адрес запоминается, дальше достаточно `bash deploy.sh`. Из Windows имя
-`имя.local` резолвится через раз, поэтому проще сразу цифрами.
+The address is remembered; after that `bash deploy.sh` is enough. From
+Windows, `hostname.local` resolves only about half the time, so it is
+simpler to use the numbers.
 
-Дальше на самой плате:
+Then on the board itself:
 
 ```bash
 sudo bash setup-step1.sh && sudo reboot
 sudo bash check-step1.sh && sudo bash setup-step2.sh
 ```
 
-Первый включает I2C, SPI и UART и отключает Bluetooth — иначе настоящий
-UART достаётся ему, а на ножках остаётся mini-UART с плавающей скоростью, и
-радар связи не держит. Ключевая строка проверки — `/dev/serial0 -> ttyAMA0`.
+The first enables I2C, SPI and UART and disables Bluetooth — otherwise
+Bluetooth takes the real UART and leaves the pins with the mini-UART, whose
+clock drifts with the CPU, and the radar cannot hold a link. The line to
+look for in the check is `/dev/serial0 -> ttyAMA0`.
 
-Второй ставит библиотеки **через apt, а не pip**: pip вне окружения
-заблокирован (PEP 668), да и собирать numpy на Zero 2 W — часы.
+The second installs libraries **through apt, not pip**: pip outside a
+virtualenv is blocked (PEP 668), and building numpy on a Zero 2 W takes
+hours.
 
-### 3. Паять и подключать по одному узлу
+### 3. Solder and connect one module at a time
 
-Схемы: [маршрутный лист](docs/маршрутный-лист.png) — что куда втыкать по
-порядку ножек, [линиями](docs/подключение-линиями.png) — как провод идёт,
-[распиновка](docs/распиновка.png) — вся гребёнка целиком.
+Diagrams: [the routing sheet](docs/маршрутный-лист.png) — what goes where,
+in pin order; [by lines](docs/подключение-линиями.png) — how each wire runs;
+[the pinout](docs/распиновка.png) — the whole header.
 
-После каждого узла — проверка. Это главное правило: подключив всё разом,
-отказ одного датчика не отличить от ошибки в проводке другого.
+Check after every module. This is the one rule that matters: connect
+everything at once and you cannot tell a dead sensor from a miswired
+neighbour.
 
 ```bash
 python3 tools/bringup.py kernel
 python3 tools/bringup.py display
 ```
 
-Дальше `touch`, `encoder`, `radar`, `air` — в том порядке, в каком паяете.
-Каждый шаг при отказе печатает, какой провод смотреть.
+Then `touch`, `encoder`, `radar`, `air`, in whatever order you solder them.
+On failure each step prints which wire to look at.
 
-### 4. Калибровка
+### 4. Calibration
 
 ```bash
 python3 tools/touch_calibrate.py
 ```
 
-Рисует крестик и ждёт нажатия — сколько угодно долго, без отсчётов.
-Настраивает и координаты, и силу нажатия, и пишет результат в конфиг сам.
+Draws a cross and waits for a press — for as long as you like, with no
+countdown. It sets both the coordinates and the press force, and writes the
+result itself.
 
-Силу нажатия потом можно крутить и без калибровки — ползунком
-«чувствительность экрана» в приложении или в браузере. Он действует сразу,
-перезагружать блок не нужно. Побеждает сделанное последним: подвинул
-ползунок — работает ползунок, откалибровал — ползунок забыт.
+Press force can also be adjusted without calibrating, with the "touch
+sensitivity" slider in the app or in the browser. It takes effect at once;
+no reboot. Whichever you did last wins: move the slider and the slider
+rules, calibrate and the slider is forgotten.
 
 ```bash
 python3 tools/radar_calibrate.py --auto
 ```
 
-Радару нужна не калибровка на месте, а сутки наблюдений: блок сам считает,
-сколько раз каждая зона показывала какой уровень энергии, и за день комната
-бывает и пустой, и занятой. Команда достаёт пороги из накопленного — ни
-выходить из комнаты, ни останавливать сервис не нужно.
+The radar does not need calibration on the spot — it needs a day of
+observation. The device counts how often each zone reported each energy
+level, and over a day a room is both empty and occupied. The command derives
+the thresholds from what accumulated. You do not need to leave the room or
+stop the service.
 
-### 5. Автозапуск
+### 5. Autostart
 
 ```bash
 sudo bash systemd/install.sh
 ```
 
-Поднимает сервис экрана и дашборд. Проверьте перезагрузкой: всё должно
-подняться само, часы появляются секунд через семнадцать после включения.
+Brings up the display service and the dashboard. Verify by rebooting:
+everything should come back on its own, and the clock appears about
+seventeen seconds after power-on.
 
 ---
 
-## Приложение для компьютера
+## The desktop app
 
-<img src="docs/приложение.png" width="720" alt="Приложение">
+<img src="docs/приложение.png" width="720" alt="The app">
 
-`pc/DeskCompanion` — окно на .NET 8: обзор, состав экранов, статистика,
-настройки. Живёт в трее, ждёт блок и подхватывает его, как только тот
-появится в сети.
+`pc/DeskCompanion` is a .NET 8 window: overview, screen list, statistics,
+settings. It lives in the tray, waits for the device and picks it up the
+moment it appears on the network.
 
-Своей логики подсчёта в нём нет намеренно: и метрики, и список экранов
-живут на блоке, он же ведёт базу. Вторая копия подсчётов на стороне ПК
-означала бы два источника правды, расходящихся ровно тогда, когда на них
-смотрят.
+It deliberately has no counting logic of its own: the metrics and the screen
+list live on the device, which also keeps the database. A second copy of the
+arithmetic on the PC would mean two sources of truth, diverging exactly when
+someone looks at them.
 
-Раз в сутки приложение забирает базу измерений себе. Это не роскошь:
-история живёт на карте памяти в единственном экземпляре, а карта —
-расходник, и умирают они без предупреждения.
+Once a day the app pulls the measurement database down to itself. This is
+not a luxury: the history lives on a memory card in a single copy, and cards
+are consumables that die without warning.
 
-`agent/` — второй компонент, он снимает с компьютера нажатия, загрузку,
-температуры, активное окно и текущий трек и отдаёт их блоку по MQTT.
+`agent/` is the second component. It reads keystrokes, load, temperatures,
+the active window and the current track from the computer and sends them to
+the device over MQTT.
 
-Готовые программы — на [странице релизов](../../releases): два файла,
-качать и запускать. Ставить .NET не нужно, рантайм внутри.
+Prebuilt programs are on the [releases page](../../releases): two files,
+download and run. You do not need to install .NET — the runtime is inside.
 
-Собрать самому (нужен [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)):
+To build them yourself (needs the
+[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)):
 
 ```
 powershell -ExecutionPolicy Bypass -File pc\build.ps1
 ```
 
-Обе программы лягут в папку `Программа` рядом с проектом, и туда же встанет
-ярлык на рабочем столе. Отдельная папка — не украшение: своё место сборки
-dotnet кладёт по адресу вида `bin\Release\net8.0-windows\win-x64\publish\`,
-который невозможно ни запомнить, ни найти.
+Both land in a folder named `Программа` next to the project, along with a
+desktop shortcut. The separate folder is not decoration: dotnet's own output
+path looks like `bin\Release\net8.0-windows\win-x64\publish\`, which is
+impossible to remember and impossible to find.
 
-Автозапуск обоих — один скрипт, от имени администратора:
+Autostart for both is one script, run as administrator:
 
 ```
 powershell -ExecutionPolicy Bypass -File pc\autostart.ps1
 ```
 
-Механики разные, и не от лени. Приложение — обычная пользовательская
-программа, ему хватает ветки автозагрузки: она правится без повышения прав
-и видна в диспетчере задач, то есть отключить её можно и без нас. Агенту же
-нужны права администратора, иначе LibreHardwareMonitor не читает
-температуры, — и через ту же ветку это означало бы запрос UAC при каждом
-входе в систему. Поэтому агент идёт задачей планировщика с высокими
-правами: она стартует молча. Снять всё обратно — тот же скрипт с `-Remove`.
+The two use different mechanisms, and not out of laziness. The app is an
+ordinary user program, so the Run registry key is enough: it can be edited
+without elevation and it shows up in Task Manager, which means the user can
+disable it without us. The agent needs administrator rights — without them
+LibreHardwareMonitor cannot read temperatures — and through the Run key that
+would mean a UAC prompt at every single login. So the agent goes in as a
+Scheduled Task with highest privileges, which starts silently. To undo all
+of it, run the same script with `-Remove`.
 
 ---
 
-## Если не работает
+## When it does not work
 
-| Что видно | Что смотреть |
+| What you see | What to look at |
 |---|---|
-| Экран тёмный, но блок отвечает по сети | подсветка на GPIO18. Разовый скрипт, показав кадр, освобождает ножку и гасит экран — это норма, проверять надо тем, что живёт |
-| По картинке горизонтальные полосы | скорость SPI. Каждое ответвление на шине заваливает фронты; у нас с тачем и разветвителями пришлось опуститься с 32 МГц до 16 |
-| Радар молчит | `python3 tools/radar_wake.py`. Модуль умеет застревать в режиме настройки, и **перезагрузка платы его не лечит**: пять вольт при ней не пропадают |
-| Датчик воздуха отвечает, но отдаёт нули | снять питание с платы физически, из розетки. По той же причине: reboot модули не обесточивает |
-| Тач требует сильного нажатия | ползунок «чувствительность экрана» в приложении или в браузере, вправо. Под ним `max_resistance` в `[touch]`: сопротивление обратно силе, поэтому низкий порог и означает «дави сильнее» |
-| Часы показывают присутствие в пустой комнате | радар не откалиброван, см. шаг 4 |
-| Сервис запустился, но чего-то не хватает | `journalctl -u desk-companion -b` — он печатает, какой узел не поднялся и почему |
+| Screen dark, but the device answers over the network | the backlight on GPIO18. A one-shot script releases the pin after showing a frame and the screen goes dark — that is normal; test with something long-running |
+| Horizontal stripes across the picture | SPI clock. Every stub on the bus degrades the edges; with the touch panel and our hand-made splitters we had to come down from 32 MHz to 16 |
+| The radar is silent | `python3 tools/radar_wake.py`. The module can get stuck in configuration mode, and **rebooting the board does not fix it**: 5 V never drops during a reboot |
+| The air sensor answers but returns zeros | pull the power physically, from the wall. Same reason: a reboot does not de-energise the modules |
+| Touch needs a hard press | the "touch sensitivity" slider in the app or the browser, to the right. Underneath it is `max_resistance` in `[touch]`: resistance is inverse to force, so a low threshold is what means "press harder" |
+| The device reports presence in an empty room | the radar is not calibrated — see step 4 |
+| The service started but something is missing | `journalctl -u desk-companion -b` prints which module failed to come up and why |
 
 ---
 
-## Разработка без железа
+## Developing without the hardware
 
 ```bash
-cd pi && py preview_server.py          # localhost:842 — экраны и эмулятор ввода
-py tools/seed.py --days 21 && py dashboard_server.py   # localhost:843 — дашборд
-py -m app.main --fake                  # сервис целиком, кадры в preview/live.png
+cd pi && py preview_server.py          # localhost:842 — screens and an input emulator
+py tools/seed.py --days 21 && py dashboard_server.py   # localhost:843 — the dashboard
+py -m app.main --fake                  # the whole service, frames into preview/live.png
 ```
 
-Проверки, которые стоит гонять после правок интерфейса:
+Checks worth running after any interface change:
 
-| Команда | Что ловит |
+| Command | What it catches |
 |---|---|
-| `py tools/check_imports.py` | импорт, ведущий к несуществующему имени. Звучит невозможно — но именно из-за такого радар не поднимался ни разу, а ни тесты, ни линтеры этого не видят |
-| `py tools/check_config.py` | настройку, которая никуда не ведёт: ключ есть, а код его не читает — или наоборот. Плюс экран, который листается на устройстве, но не показывается в списке настроек |
-| `py tools/check_language.py` | текст, оставшийся русским при английском языке. Ищется прогоном, а не чтением кода: рисуем все экраны и смотрим, что прошло мимо словаря |
-| `py tools/check_layout.py --en` | то же, что ниже, но на английском: слова другой длины, и подпись, влезавшая по-русски, уезжает за край |
-| `py tools/check_layout.py` | текст за краем экрана и наезды подписей, на четырёх состояниях данных |
-| `py tools/walk_menu.py` | обход всех состояний меню: ловушки и места, откуда до карусели дальше трёх действий |
-| `py tools/latency.py` | из чего складывается задержка «датчик увидел → на экране видно» |
-| шесть файлов `test_*.py` | 378 проверок, все без железа |
+| `py tools/check_imports.py` | an import that resolves to a name which does not exist. Sounds impossible — but this is exactly why the radar never once came up through the service, and neither tests nor linters see it |
+| `py tools/check_config.py` | a setting that leads nowhere: the key exists but no code reads it, or the reverse. Plus a screen that scrolls on the device but is missing from the settings list |
+| `py tools/check_language.py` | text that stayed Russian with English selected. Found by running, not by reading: we render every screen and see what slipped past the dictionary |
+| `py tools/check_layout.py` | text past the edge of the screen and captions colliding, across four states of the data |
+| `py tools/check_layout.py --en` | the same in English: the words are a different length, and a caption that fitted in Russian can run off the edge |
+| `py tools/walk_menu.py` | walks every state of the menu: dead ends, and places more than three actions away from the carousel |
+| `py tools/latency.py` | what the delay from "the sensor saw it" to "it is on screen" is made of |
+| six `test_*.py` files | 378 checks, all without hardware |
 
 ---
 
-## Как устроено
+## How it is put together
 
 ```
 pi/app/
-  main.py        главный цикл: опрашивает источники, рисует, пишет в базу
-  director.py    что на экране: карусель, покой или подробности
-  hardware.py    единственное место, где живут spidev, gpiozero и pyserial
-  state.py       общая структура состояния — источники пишут, экраны читают
-  screens/       экраны, покой, настройки, общие виджеты
-  sources/       датчики, погода, MQTT, здоровье блока; у каждого свой период
-  drivers/       протоколы: LD2410, SCD41, XPT2046, энкодер
-  display/       два бэкенда — SPI и PNG — за одним интерфейсом
+  main.py        the main loop: polls sources, draws, writes to the database
+  director.py    what is on screen: carousel, idle, or an overlay
+  hardware.py    the only place where spidev, gpiozero and pyserial live
+  state.py       the shared state — sources write it, screens read it
+  screens/       screens, idle modes, settings, shared widgets
+  sources/       sensors, weather, MQTT, device health; each with its own period
+  drivers/       protocols: LD2410, SCD41, XPT2046, the encoder
+  display/       two backends — SPI and PNG — behind one interface
 ```
 
-Два принципа, из которых следует остальное.
+Two principles, from which the rest follows.
 
-**Превью гоняет настоящий код отрисовки.** В браузер уходит тот же PNG
-480×320, что пойдёт на экран. Рисуй страница интерфейс своими средствами —
-получились бы две реализации одного макета, и они разъехались бы на второй
-неделе. По той же причине шрифт лежит в репозитории, а не берётся
-системный: у Segoe UI и DejaVu разные метрики, и превью врало бы про то,
-влезает ли текст.
+**The preview runs the real rendering code.** What goes to the browser is
+the same 480×320 PNG that goes to the screen. If the page drew the interface
+by its own means, there would be two implementations of one layout, and they
+would drift apart within a fortnight. For the same reason the font is in the
+repository rather than taken from the system: Segoe UI and DejaVu have
+different metrics, and the preview would lie about whether text fits.
 
-**Транспорт отделён от протокола.** Драйверы знают байты, но не знают про
-spidev. Поэтому разбор кадров радара, контрольные суммы датчика воздуха и
-антидребезг энкодера проверены тестами до того, как что-либо припаяно.
+**Transport is separated from protocol.** The drivers know bytes but know
+nothing about spidev. That is why radar frame parsing, the air sensor's
+checksums and the encoder's debouncing were all tested before anything was
+soldered.
 
-Как добавить свой экран — [ВКЛАД.md](ВКЛАД.md). Про корпус, вентиляцию и
-то, почему радар нельзя ставить за экраном — [КОРПУС.md](КОРПУС.md).
-Состояние работ и журнал сборки — [TODO.md](TODO.md).
-
----
-
-## Что дальше
-
-- **Модель корпуса под печать.** Компоновка, зазоры и вентиляция уже
-  разобраны в [КОРПУС.md](КОРПУС.md) — там же сказано, почему радар нельзя
-  ставить за экраном и куда обязан смотреть датчик воздуха. Файлы для
-  печати появятся отдельным обновлением
-- **Поиск странного** — модель есть, ей нужны одна-две недели данных, чтобы
-  ей было с чем сравнивать
+How to add your own screen — [ВКЛАД.md](ВКЛАД.md). The case, ventilation,
+and why the radar must not sit behind the screen —
+[КОРПУС.md](КОРПУС.md). Current state and the build log —
+[TODO.md](TODO.md). These are in Russian; a translation is
+[welcome](CONTRIBUTING.md).
 
 ---
 
-## Лицензия
+## What is next
 
-[MIT](LICENSE) — берите, правьте, собирайте себе, ставьте в свои проекты, в
-том числе в платные. Единственное условие — не выдавать за своё: оставить
-строчку об авторстве. Гарантий никаких: если припаяете не туда, это ваш
-паяльник.
+- **A 3D-printable case.** The layout, the clearances and the ventilation
+  are already worked out in [КОРПУС.md](КОРПУС.md) — including why the radar
+  must not sit behind the screen and where the air sensor has to face. The
+  printable files will come in a separate update
+- **Anomaly detection** — the model exists; it needs a week or two of data
+  before it has anything to compare against
 
-Стороннее: шрифт Nunito — SIL Open Font License, лежит в репозитории.
-Погода — [Open-Meteo](https://open-meteo.com), без ключа и регистрации.
-`.NET`, `MQTTnet`, `NAudio` — MIT; `LibreHardwareMonitorLib` — MPL 2.0.
+---
+
+## Contributing
+
+**Pull requests are welcome** — anything: a fix, a new screen, support for
+another sensor, a corrected diagram, a translation. You do not have to fix
+it yourself; describing a bug in the code or in the instructions as an Issue
+is help too.
+
+What to run before opening a pull request, and what we ask of a change:
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+Everything is verifiable without the hardware — all you need is Python.
+
+---
+
+## Licence
+
+[MIT](LICENSE) — take it, change it, build one for yourself, put it in your
+own projects, including paid ones. The one condition is not to pass it off
+as your own: keep the attribution line. No warranty of any kind: if you
+solder it to the wrong pin, that is your soldering iron.
+
+Third party: the Nunito font — SIL Open Font License, included in the
+repository. Weather — [Open-Meteo](https://open-meteo.com), no key, no
+sign-up. `.NET`, `MQTTnet`, `NAudio` — MIT; `LibreHardwareMonitorLib` —
+MPL 2.0.
