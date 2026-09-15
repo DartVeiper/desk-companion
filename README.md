@@ -98,6 +98,13 @@ The second installs libraries **through apt, not pip**: pip outside a
 virtualenv is blocked (PEP 668), and building numpy on a Zero 2 W takes
 hours.
 
+> **The MQTT broker comes up without a password**, and the dashboard on port
+> 843 without authentication. That is deliberate: this device is meant to
+> sit on a home network behind a router, and a password on a broker only you
+> can reach buys nothing. But it is your decision, not ours — if the board
+> will live anywhere reachable from outside, set up `mosquitto` credentials
+> and do not forward those ports.
+
 ### 3. Solder and connect one module at a time
 
 Diagrams: [the routing sheet](docs/маршрутный-лист.png) — what goes where,
