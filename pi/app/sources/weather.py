@@ -17,6 +17,7 @@ import json
 import urllib.request
 from datetime import datetime
 
+from .. import forecast
 from ..state import State
 from .base import Source
 
@@ -58,7 +59,11 @@ class WeatherSource(Source):
         return (
             f"{API}?latitude={self.latitude}&longitude={self.longitude}"
             "&current=temperature_2m,weather_code,is_day"
-            "&minutely_15=precipitation&forecast_minutely_15=8&timezone=auto"
+            "&minutely_15=precipitation&forecast_minutely_15=8"
+            # Двое суток по часам — этого хватает на три части суток вперёд
+            # даже поздно вечером, когда всё интересное уже завтра.
+            "&hourly=temperature_2m,weather_code&forecast_days=2"
+            "&timezone=auto"
         )
 
     def poll(self, state: State) -> bool:
@@ -72,6 +77,14 @@ class WeatherSource(Source):
         state.weather.cond = CODES.get(code, "")
         state.weather.is_day = bool(int(current.get("is_day", 1)))
         state.weather.rain_soon_minutes = rain_in_minutes(data.get("minutely_15"))
+
+        hourly = data.get("hourly") or {}
+        state.weather.ahead = forecast.parts(
+            hourly.get("time", []),
+            hourly.get("temperature_2m", []),
+            hourly.get("weather_code", []),
+            datetime.now(),
+        )
         self.updated_at = datetime.now()
         return True
 

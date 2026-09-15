@@ -174,6 +174,10 @@ def save_settings(payload: dict) -> dict:
         known = {k for k, _ in SCREEN_CATALOG}
         chosen = [k for k in payload["screens"] if k in known]
         values["screens.enabled"] = chosen or [SCREEN_CATALOG[0][0]]
+        # Запоминаем весь каталог, а не только включённое: иначе выключенный
+        # экран не отличить от появившегося с обновлением, и один из них
+        # обязательно будет обработан неверно.
+        values["screens.known"] = [k for k, _ in SCREEN_CATALOG]
     if isinstance(payload.get("ambient"), list):
         values["ambient.enabled"] = [k for k, _ in AMBIENT_CATALOG if k in payload["ambient"]]
     for key, name in (("away_delay_minutes", "ambient.away_delay_minutes"),

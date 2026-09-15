@@ -145,9 +145,22 @@ class Recorder:
         if self._minute == minute:
             return
         if self._minute is not None:  # первую неполную минуту пропускаем
+            # Когда компьютер выключен, его цифры писать нельзя. Агент шлёт
+            # их с признаком «сохранять», чтобы после перезапуска блока
+            # данные появились сразу, не дожидаясь следующей минуты, — но
+            # то же сообщение переживает и смерть агента. Выключив ПК в
+            # полночь, мы получили шесть строк подряд с одними и теми же
+            # 313 нажатиями: брокер честно отдавал последнее, что слышал.
+            #
+            # Ноль здесь честнее последнего известного: мы не знаем, что
+            # делал выключенный компьютер, и знать не можем.
+            online = state.pc_online
             self.storage.add_activity_minute(
-                self._minute, state.pc.keystrokes, state.pc.mouse_clicks,
-                0, state.desk.presence, state.pc.category,
+                self._minute,
+                state.pc.keystrokes if online else 0,
+                state.pc.mouse_clicks if online else 0,
+                0, state.desk.presence,
+                state.pc.category if online else "",
             )
         self._minute = minute
 

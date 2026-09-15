@@ -5,6 +5,7 @@
 enabled = [
     "clock.ClockScreen",        # 1. Часы + погода
     "details.WeatherDetail",    # 2. Погода подробно
+    "forecast.ForecastScreen",  # 3. Прогноз по частям суток
     "details.AirDetail",        # 3. Воздух подробно
     "activity.ActivityScreen",  # 4. Активность
     "away.AwayScreen",          # 3. Меня нет

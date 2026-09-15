@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import theme  # noqa: E402
 from app.screens import registry as registry_mod  # noqa: E402
+from app import forecast
 from app.state import State  # noqa: E402
 
 CONFIG = Path(__file__).resolve().parents[1] / "app" / "config.toml"
@@ -94,6 +95,13 @@ def states() -> list[tuple[str, State]]:
     # вовсе, и наезд подписи на вердикт проверка не видит.
     full.env.trend = [560 + (i * 7) % 340 for i in range(48)]
     full.health.clock_synced = True
+    # Прогноз с самыми длинными подписями: «завтра вечером» в узкой
+    # колонке и «сильный снегопад с метелью» под ней.
+    full.weather.ahead = [
+        forecast.Part("вечером", "сегодня", -14.0, 75, False),
+        forecast.Part("ночью", "завтра", -19.0, 96, False),
+        forecast.Part("вечером", "завтра", -11.0, 82, False),
+    ]
     full.desk.note_presence(True, now - timedelta(hours=3), 5)
     full.desk.manual_status = "не беспокоить"
     full.desk.manual_until = now + timedelta(hours=4, minutes=37)

@@ -25,6 +25,11 @@ DEFAULT_PATH = Path(__file__).resolve().parent / "settings.json"
 #: браузер не должен уметь переписать номера ножек.
 ALLOWED = {
     "screens.enabled": list,
+    #: Все экраны, которые человек когда-либо видел в списке настроек.
+    #: Нужен, чтобы отличить «выключил» от «появился с обновлением»: в
+    #: screens.enabled лежат только включённые, и по их отсутствию эти два
+    #: случая неразличимы.
+    "screens.known": list,
     "ambient.enabled": list,
     "ambient.away_delay_minutes": int,
     "ambient.night_from": int,
@@ -81,10 +86,37 @@ def save(values: dict, path: Path | None = None) -> dict:
 def apply(config: dict, overrides: dict | None = None) -> dict:
     """Наложить настройки на конфиг. Исходный словарь не трогаем."""
     merged = copy.deepcopy(config)
-    for key, value in (overrides if overrides is not None else load()).items():
+    saved = overrides if overrides is not None else load()
+
+    for key, value in saved.items():
         section, _, name = key.partition(".")
         merged.setdefault(section, {})[name] = value
+
+    if "screens.enabled" in saved:
+        merged["screens"]["enabled"] = with_new_screens(
+            config.get("screens", {}).get("enabled", []),
+            saved["screens.enabled"],
+            saved.get("screens.known"),
+        )
     return merged
+
+
+def with_new_screens(from_config: list, chosen: list,
+                     known: list | None = None) -> list:
+    """Сохранённый порядок плюс экраны, появившиеся с обновлением.
+
+    Без этого любой новый экран оказывался невидимым для всех, кто хоть раз
+    открывал настройки: сохранённый список заменял список из конфига
+    целиком, и добавленное обновлением в него просто не попадало.
+
+    Отличить «человек выключил» от «появилось в обновлении» можно только по
+    списку виденного. Если его ещё нет — файл настроек старый, — считаем
+    виденным то, что включено: для того, кто ничего не выключал, это то же
+    самое, а после первого же сохранения список станет точным.
+    """
+    seen = set(known if known is not None else chosen)
+    fresh = [name for name in from_config if name not in seen and name not in chosen]
+    return list(chosen) + fresh
 
 
 def mtime(path: Path | None = None) -> float:

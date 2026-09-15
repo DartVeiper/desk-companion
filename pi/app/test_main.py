@@ -529,6 +529,64 @@ with tempfile.TemporaryDirectory() as tmp:
     check("битый файл не роняет, а даёт пустую",
           radar_levels.Levels.load(Path(tmp) / "битый.json").samples, 0)
 
+# Экраны, появившиеся с обновлением. Сохранённый из браузера список
+# заменял список из конфига целиком, и добавленный экран не видел никто,
+# кто хоть раз открывал настройки.
+
+print("\nНовые экраны после обновления")
+
+catalog = ["clock", "weather", "forecast", "air"]
+
+check("старый файл настроек — новый экран добавлен",
+      settings_mod.with_new_screens(catalog, ["clock", "weather", "air"], None),
+      ["clock", "weather", "air", "forecast"])
+check("выключенный экран обратно не возвращается",
+      settings_mod.with_new_screens(catalog, ["clock", "weather", "air"],
+                                    ["clock", "weather", "forecast", "air"]),
+      ["clock", "weather", "air"])
+check("порядок, выставленный мышкой, сохраняется",
+      settings_mod.with_new_screens(catalog, ["air", "clock", "weather"],
+                                    ["air", "clock", "weather"]),
+      ["air", "clock", "weather", "forecast"])
+
+merged = settings_mod.apply(
+    {"screens": {"enabled": catalog}},
+    {"screens.enabled": ["clock", "air"], "screens.known": ["clock", "weather", "air"]},
+)
+check("наложение целиком: и порядок, и новое",
+      merged["screens"]["enabled"], ["clock", "air", "forecast"])
+
+# Выключенный компьютер. Агент шлёт цифры с признаком «сохранять», и
+# брокер отдаёт последнее услышанное даже после смерти агента. Выключив ПК
+# в полночь, мы получили шесть строк подряд с одними и теми же нажатиями.
+
+with tempfile.TemporaryDirectory() as tmp:
+    offline_db = Database(Path(tmp) / "offline.db")
+    keeper = Recorder(offline_db)
+    st = State(now=datetime(2026, 9, 15, 0, 6))
+    st.health.clock_synced = True
+    st.desk.presence = True
+    st.pc.keystrokes, st.pc.mouse_clicks = 313, 135
+    st.pc.category = "game"
+    st.pc.last_heartbeat = st.now          # ПК ещё жив
+    keeper.tick(st)
+
+    st.now = datetime(2026, 9, 15, 0, 7)
+    keeper.tick(st)
+    row = offline_db.conn.execute(
+        "SELECT * FROM activity_minute ORDER BY ts DESC LIMIT 1").fetchone()
+    check("пока ПК на связи — цифры пишутся", row["keystrokes"], 313)
+
+    # ПК выключили: сердцебиение протухло, а значения в состоянии остались.
+    st.now = datetime(2026, 9, 15, 0, 8)
+    keeper.tick(st)
+    row = offline_db.conn.execute(
+        "SELECT * FROM activity_minute ORDER BY ts DESC LIMIT 1").fetchone()
+    check("ПК выключен — в историю ноль, а не вчерашнее", row["keystrokes"], 0)
+    check("и занятие не выдумываем", row["category"], "")
+    check("а присутствие за столом знает сам блок", row["at_desk"], 1)
+    offline_db.close()
+
 # Перевод часов. У Pi нет часов реального времени: при выключении время
 # запоминается, при включении восстанавливается, и сервис стартует раньше,
 # чем NTP ответит. Выключенный в полночь блок включается уверенным, что
@@ -715,7 +773,10 @@ with tempfile.TemporaryDirectory() as tmp:
             "ambient": {"enabled": ["x"], "away_delay_minutes": 3},
             "display": {"dc": 25}}
     merged = settings_mod.apply(base, settings_mod.load(store))
-    check("список экранов заменён", merged["screens"]["enabled"], ["clock.ClockScreen"])
+    # Выбор человека — первым, и к нему добавлено то, чего он ещё не видел:
+    # a, b и c появились в конфиге после того, как он сохранял настройки.
+    check("выбор человека сохранён, новое добавлено",
+          merged["screens"]["enabled"], ["clock.ClockScreen", "a", "b", "c"])
     check("пауза покоя переопределена", merged["ambient"]["away_delay_minutes"], 6)
     check("не тронутое осталось", merged["screens"]["manual"], "manual")
     check("пины целы", merged["display"]["dc"], 25)
