@@ -111,6 +111,11 @@ def snapshot(state: State, sources: list | None = None,
                 "moving_gates": report.moving_gates,
                 "static_gates": report.static_gates,
             }
+            # Что решило правило «у стола» и какие пороги у зон: без этого
+            # приложение не может объяснить, почему «за столом» или нет.
+            view = getattr(source, "desk_view", None)
+            if callable(view):
+                data["radar"].update(view())
             # Сколько уже накопила копилка уровней. По этому числу видно,
             # можно ли уже считать пороги: калибровке нужны часы, и без
             # такого счётчика остаётся только гадать, сколько ещё ждать.

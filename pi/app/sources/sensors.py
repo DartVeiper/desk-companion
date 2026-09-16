@@ -202,14 +202,19 @@ class Ld2410Source(Source):
 
     def __init__(self, port, engineering: bool = False,
                  levels_path: Path | None = None,
-                 near_thresholds: list[int] | None = None) -> None:
+                 moving_thresholds: list[int] | None = None,
+                 static_thresholds: list[int] | None = None) -> None:
         super().__init__()
         self.port = port
         self.engineering = engineering
-        #: Пороги движения ближних ворот — те же, что залиты в модуль.
-        #: Без них правило про движение у стола не работает, и присутствие
-        #: решает один модуль, как раньше.
-        self.near_thresholds = list(near_thresholds or [])[:self.NEAR_GATES]
+        #: Пороги всех зон — те же, что залиты в модуль. Все целиком нужны
+        #: только тем, кто их показывает: приложению, чтобы на картинке
+        #: зон было видно, какая полоска перешла черту.
+        self.moving_thresholds = list(moving_thresholds or [])
+        self.static_thresholds = list(static_thresholds or [])
+        #: Пороги движения ближних ворот. Без них правило про движение у
+        #: стола не работает, и присутствие решает один модуль, как раньше.
+        self.near_thresholds = self.moving_thresholds[:self.NEAR_GATES]
         self._near_motion_at = time.monotonic()
         #: Присутствие сейчас держится только дальними зонами — и уже
         #: дольше, чем положено. Помним, чтобы сказать об этом в журнал один
@@ -270,6 +275,22 @@ class Ld2410Source(Source):
         # Время удержания настраивается в самом модуле (set_max_gates),
         # поэтому мигание гасится там, а не здесь.
         return state.desk.note_presence(self._at_desk(report), state.now, BREAK_MINUTES)
+
+    def desk_view(self) -> dict:
+        """Что решило правило «у стола» — для тех, кто показывает радар.
+
+        Без этого картинка зон в приложении врала бы: модуль говорит «цель
+        есть», а на экране «никого», и понять, почему, было бы не по чему.
+        """
+        return {
+            "near_gates": self.NEAR_GATES,
+            "hold_seconds": self.HOLD_WITHOUT_NEAR_MOTION,
+            "near_motion_ago": (round(time.monotonic() - self._near_motion_at, 1)
+                                if self.near_thresholds else None),
+            "ghost": self._ghost,
+            "moving_thresholds": self.moving_thresholds,
+            "static_thresholds": self.static_thresholds,
+        }
 
     def _at_desk(self, report: ld2410.Report) -> bool:
         """Решение модуля, но присутствие без движения у стола — не дольше

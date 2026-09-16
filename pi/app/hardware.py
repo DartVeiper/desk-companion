@@ -136,7 +136,8 @@ def open_radar(cfg: dict):
     # источник решает, было ли движение у стола.
     source = Ld2410Source(port, engineering=cfg.get("engineering", True),
                           levels_path=levels,
-                          near_thresholds=cfg.get("gate_moving"))
+                          moving_thresholds=cfg.get("gate_moving"),
+                          static_thresholds=cfg.get("gate_static"))
     source.levels = Levels.load(levels)
     source.setup_problems = _configure_radar(port, cfg)
     return source

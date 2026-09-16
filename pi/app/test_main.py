@@ -414,7 +414,7 @@ def gate_report(state_code: int, moving: list[int], static: list[int]) -> ld2410
 
 
 calm = [0] * 9
-desk = Ld2410Source(FakePort(b""), near_thresholds=[35, 28, 20, 19, 19, 100, 100, 100, 100])
+desk = Ld2410Source(FakePort(b""), moving_thresholds=[35, 28, 20, 19, 19, 100, 100, 100, 100])
 check("берутся пороги только ближних зон", desk.near_thresholds, [35, 28])
 
 typing = gate_report(ld2410.BOTH, [60, 10, 5, 0, 0, 0, 0, 0, 0], [0, 0, 90, 60, 0, 0, 0, 0, 0])
@@ -456,6 +456,17 @@ check("ушёл при шевелящейся шторе — стол пуст",
       ghost_state.desk.note_presence(desk._at_desk(curtain), ghost_state.now, BREAK_MINUTES),
       True)
 check("и состояние это отражает", ghost_state.desk.presence, False)
+
+# Картина для приложения: по ней страница «Радар» объясняет решение.
+view = desk.desk_view()
+check("картина радара: пороги всех зон, а не только ближних",
+      (view["moving_thresholds"], view["near_gates"]),
+      ([35, 28, 20, 19, 19, 100, 100, 100, 100], 2))
+check("картина радара: присутствие снято правилом", view["ghost"], True)
+check("картина радара: у стола тихо дольше удержания",
+      view["near_motion_ago"] > view["hold_seconds"], True)
+check("без порогов правило не работает — и картина так и говорит",
+      trusting.desk_view()["near_motion_ago"], None)
 
 
 # Настройка модуля. Проверяем именно тот путь, которым идёт сервис: раньше
@@ -1110,6 +1121,17 @@ snap = status_mod.snapshot(snap_state, [RadarStub()])
 check("присутствие в снимке", snap["presence"], True)
 check("энергия по воротам доехала", len(snap["radar"]["moving_gates"]), 9)
 check("отказ питания попал в снимок", [p["label"] for p in snap["problems"]], ["питание"])
+check("у источника без картины правила снимок прежний", "near_gates" in snap["radar"], False)
+
+
+class ViewStub(RadarStub):
+    def desk_view(self) -> dict:
+        return {"near_gates": 2, "ghost": False, "near_motion_ago": 4.2}
+
+
+viewed = status_mod.snapshot(snap_state, [ViewStub()])
+check("картина правила «у стола» попала в снимок",
+      (viewed["radar"]["near_gates"], viewed["radar"]["near_motion_ago"]), (2, 4.2))
 
 with tempfile.TemporaryDirectory() as tmp:
     path = Path(tmp) / "status.json"
