@@ -9,7 +9,7 @@ weather, watches the air in the room, knows whether you are at your desk,
 and keeps track of what you do on your computer. One case, one power cable.
 
 Everything is drawn and tested **without the hardware**: screens render in a
-browser, sensors are replaced by stubs, and 378 checks run on any machine
+browser, sensors are replaced by stubs, and 446 checks run on any machine
 with Python. Only debugged code goes to the board.
 
 ---
@@ -133,6 +133,12 @@ Draws a cross and waits for a press — for as long as you like, with no
 countdown. It sets both the coordinates and the press force, and writes the
 result itself.
 
+Or without SSH at all: **Settings → Touch calibration** in the desktop
+app. The crosses appear on the device screen, you press four corners, and
+the result applies at once — no service restart. The orientation of the
+panel is worked out from the presses themselves, so a mirrored or rotated
+panel calibrates just as well.
+
 Press force can also be adjusted without calibrating, with the "touch
 sensitivity" slider in the app or in the browser. It takes effect at once;
 no reboot. Whichever you did last wins: move the slider and the slider
@@ -162,13 +168,13 @@ seventeen seconds after power-on.
 
 ## The desktop app
 
-<img src="docs/приложение.png" width="720" alt="The app">
+<img src="docs/app.png" width="720" alt="The app">
 
 `pc/DeskCompanion` is a .NET 8 window: overview, screen list, statistics,
-settings. Its own interface is Russian only so far — the device switches
-language, the app does not yet. A translation is
-[welcome](CONTRIBUTING.md). It lives in the tray, waits for the device and picks it up the
-moment it appears on the network.
+the agent, settings. It lives in the tray, waits for the device and picks it
+up the moment it appears on the network. The interface is in English or
+Russian — the choice in the settings switches the device screen too.
+Adding a language is one file in `pc/DeskCompanion/Strings`.
 
 It deliberately has no counting logic of its own: the metrics and the screen
 list live on the device, which also keeps the database. A second copy of the
@@ -181,10 +187,13 @@ are consumables that die without warning.
 
 `agent/` is the second component. It reads keystrokes, load, temperatures,
 the active window and the current track from the computer and sends them to
-the device over MQTT.
+the device over MQTT. **It has no window at all** — not even a console. What
+it is doing, its log, a start and stop button and a look at what it sees
+are all on the app's Agent page, and the app brings it back if it crashes.
 
 Prebuilt programs are on the [releases page](../../releases): two files,
-download and run. You do not need to install .NET — the runtime is inside.
+download and run. **Keep them in one folder** — the app finds the agent
+next to itself. You do not need to install .NET — the runtime is inside.
 
 To build them yourself (needs the
 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)):
@@ -224,7 +233,7 @@ of it, run the same script with `-Remove`.
 | The radar is silent | `python3 tools/radar_wake.py`. The module can get stuck in configuration mode, and **rebooting the board does not fix it**: 5 V never drops during a reboot |
 | The air sensor answers but returns zeros | pull the power physically, from the wall. Same reason: a reboot does not de-energise the modules |
 | Touch needs a hard press | the "touch sensitivity" slider in the app or the browser, to the right. Underneath it is `max_resistance` in `[touch]`: resistance is inverse to force, so a low threshold is what means "press harder" |
-| The device reports presence in an empty room | the radar is not calibrated — see step 4 |
+| The device reports presence in an empty room | first, the radar thresholds — see step 4. If the log says `the desk has had no motion for 3 min, but zone N is holding presence`, something moves at that distance: a curtain, a fan, a person behind a door — a 24 GHz radar sees through thin walls. Presence is held only by motion near the desk, so such a thing can no longer keep "at the desk" on for more than three minutes |
 | The service started but something is missing | `journalctl -u desk-companion -b` prints which module failed to come up and why |
 
 ---
@@ -247,8 +256,9 @@ Checks worth running after any interface change:
 | `py tools/check_layout.py` | text past the edge of the screen and captions colliding, across four states of the data |
 | `py tools/check_layout.py --en` | the same in English: the words are a different length, and a caption that fitted in Russian can run off the edge |
 | `py tools/walk_menu.py` | walks every state of the menu: dead ends, and places more than three actions away from the carousel |
+| `py ../pc/check_strings.py` | a string missing from one of the desktop app's languages, or a translation that lost a `{0}` — which does not crash, it just prints the sentence without the number |
 | `py tools/latency.py` | what the delay from "the sensor saw it" to "it is on screen" is made of |
-| six `test_*.py` files | 378 checks, all without hardware |
+| six `test_*.py` files | 446 checks, all without hardware |
 
 ---
 

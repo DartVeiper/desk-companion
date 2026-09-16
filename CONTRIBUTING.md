@@ -16,13 +16,14 @@ Pillow; numpy and scikit-learn are optional.
 
 ```bash
 cd pi
-py app/test_main.py          # and the five other test_*.py files, 378 checks
+py app/test_main.py          # and the five other test_*.py files, 446 checks
 py tools/check_imports.py    # every import resolves to a name that exists
 py tools/check_config.py     # config keys and code agree, both directions
 py tools/check_layout.py     # no text off-screen, four states of data
 py tools/check_layout.py --en
 py tools/check_language.py   # nothing left untranslated in English
 py tools/walk_menu.py        # no dead ends in the menu
+py ../pc/check_strings.py    # every desktop-app string exists in every language
 ```
 
 All of them must pass. They are fast — the whole set runs in under a minute
