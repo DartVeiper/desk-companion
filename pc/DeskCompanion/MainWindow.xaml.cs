@@ -55,6 +55,76 @@ public sealed class CategoryRow
     public double BarWidth { get; init; }
 }
 
+/// <summary>
+/// Полоска зоны радара: заливка по энергии и черта порога.
+/// </summary>
+/// <remarks>
+/// Длины заданы долями, а не пикселями: колонки со звёздочкой делят ширину
+/// сами, и полоске не нужно знать свою ширину — а её до вёрстки и не знает
+/// никто.
+/// </remarks>
+public sealed class BarView
+{
+    public GridLength Fill { get; init; }
+    public GridLength Rest { get; init; } = new(1, GridUnitType.Star);
+    public GridLength Mark { get; init; }
+    public GridLength MarkRest { get; init; } = new(1, GridUnitType.Star);
+    public Visibility MarkShown { get; init; } = Visibility.Collapsed;
+    public Brush? Brush { get; init; }
+    public string Text { get; init; } = "";
+
+    /// <param name="threshold">Порог зоны: null — неизвестен, 100 и выше —
+    /// зона не смотрит.</param>
+    public static BarView Of(int value, int? threshold, Brush on, Brush off)
+    {
+        value = Math.Clamp(value, 0, 100);
+        var mark = threshold is >= 0 and < 100 ? threshold.Value : -1;
+        return new BarView
+        {
+            Fill = new GridLength(value, GridUnitType.Star),
+            Rest = new GridLength(100 - value, GridUnitType.Star),
+            Mark = new GridLength(Math.Max(mark, 0), GridUnitType.Star),
+            MarkRest = new GridLength(100 - Math.Max(mark, 0), GridUnitType.Star),
+            MarkShown = mark >= 0 ? Visibility.Visible : Visibility.Collapsed,
+            // Ярко — сигнал перешёл черту и зона сработала. Без известного
+            // порога судить не о чем, и полоска просто показывает уровень.
+            Brush = threshold switch
+            {
+                null => on,
+                >= 100 => off,
+                _ => value >= threshold ? on : off,
+            },
+            Text = value.ToString(),
+        };
+    }
+}
+
+/// <summary>Строка зоны на странице «Радар».</summary>
+public sealed class ZoneView : INotifyPropertyChanged
+{
+    public string Label { get; private set; } = "";
+    public string Role { get; private set; } = "";
+    public Brush? RoleBrush { get; private set; }
+    public double Opacity { get; private set; } = 1;
+    public BarView Moving { get; private set; } = new();
+    public BarView Static { get; private set; } = new();
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void Set(string label, string role, Brush? roleBrush, double opacity,
+                    BarView moving, BarView still)
+    {
+        Label = label;
+        Role = role;
+        RoleBrush = roleBrush;
+        Opacity = opacity;
+        Moving = moving;
+        Static = still;
+        // Пустое имя значит «поменялось всё»: одно событие вместо шести.
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
+    }
+}
+
 public partial class MainWindow : Window
 {
     private readonly Board _board = new();
@@ -95,6 +165,7 @@ public partial class MainWindow : Window
         MinimizedBox.IsChecked = settings.StartMinimized;
         CollectBox.IsChecked = settings.CollectorEnabled;
         ScreenList.ItemsSource = _screens;
+        ZoneList.ItemsSource = _zones;
         FillLanguageBox();
 
         // Опрос идёт всегда, а не с момента показа окна. Раньше таймер
@@ -147,10 +218,10 @@ public partial class MainWindow : Window
     }
 
     private RadioButton[] NavButtons =>
-        new[] { NavOverview, NavScreens, NavStats, NavComputer, NavSettings };
+        new[] { NavOverview, NavScreens, NavStats, NavRadar, NavComputer, NavSettings };
 
     private FrameworkElement[] Pages =>
-        new FrameworkElement[] { PageOverview, PageScreens, PageStats, PageComputer, PageSettings };
+        new FrameworkElement[] { PageOverview, PageScreens, PageStats, PageRadar, PageComputer, PageSettings };
 
     /// <summary>Переключить страницу снаружи — нужно режиму снимка.</summary>
     public void SelectPage(string tag) => SelectPage(int.TryParse(tag, out var value) ? value : 0);
@@ -182,6 +253,7 @@ public partial class MainWindow : Window
         Refresh();
         if (_today is not null) ApplyToday(_today);
         ShowBackupState();
+        ApplyRadar(_live);
         RefreshComputer();
         RefreshAutostart();
         if (_touchKnown) TouchState.Text = Sensitivity(TouchSlider.Value);
@@ -223,6 +295,7 @@ public partial class MainWindow : Window
 
         // Скрытые страницы на опросе не перерисовываются — догоняем их при
         // открытии, чтобы не показать на мгновение прошлое состояние.
+        if (pages[index] == PageRadar) ApplyRadar(_live);
         if (pages[index] == PageComputer) RefreshComputer();
         // Задачу планировщика спрашиваем не каждую секунду, а когда на неё
         // смотрят: это обращение к службе, а не к памяти.
@@ -262,11 +335,14 @@ public partial class MainWindow : Window
 
     private int _ticks;
     private Today? _today;
+    private Live? _live;
 
     private async void Refresh()
     {
         var live = await _board.LiveAsync();
+        _live = live;
         ApplyLive(live);
+        if (PageRadar.IsVisible) ApplyRadar(live);
 
         // Сводка за день меняется минутами, а не секундами: дёргать её
         // каждую секунду — зря будить и сеть, и базу на блоке.
@@ -642,6 +718,133 @@ public partial class MainWindow : Window
         while (source is not null and not ListBoxItem)
             source = VisualTreeHelper.GetParent(source);
         return (source as ListBoxItem)?.DataContext as ScreenRow;
+    }
+
+    // ------------------------------------------------------------ радар
+
+    private const int GateCm = 75;
+
+    //: Ворота 0 и 1 статику не поддерживают — у них слишком малая дальность,
+    //: и порог статики модуль игнорирует (см. pi/app/drivers/ld2410.py).
+    //: Черта там врала бы, будто зона что-то ждёт.
+    private const int NoStaticGates = 2;
+    private readonly System.Collections.ObjectModel.ObservableCollection<ZoneView> _zones = new();
+
+    /// <summary>
+    /// Нарисовать страницу радара. На опросе зовётся, только когда страница
+    /// открыта: девять зон по две полоски раз в секунду — работа, которую
+    /// незачем делать для скрытой страницы.
+    /// </summary>
+    private void ApplyRadar(Live? live)
+    {
+        var radar = live?.Radar;
+        if (live is null || radar is null || !live.Ld2410Ok)
+        {
+            RadarDot.Fill = Brush(live is null ? "Alert" : "Dim");
+            RadarVerdict.Text = Lang.T(live is null ? "link_none" : "radar_silent");
+            RadarVerdict.Foreground = Brush(live is null ? "Alert" : "Fg");
+            RadarReason.Text = live is null ? _board.LastError ?? "" : "";
+            RadarFacts.Children.Clear();
+            // Старые полоски не оставляем: застывшая картинка выглядела бы
+            // живой, а это хуже, чем пустая.
+            _zones.Clear();
+            RadarLevels.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        RadarDot.Fill = Brush(live.Presence ? "Ok" : "Dim");
+        RadarVerdict.Text = Lang.T(live.Presence ? "radar_at_desk" : "radar_away");
+        RadarVerdict.Foreground = Brush(live.Presence ? "Ok" : "Fg");
+        var (reason, tone) = ExplainPresence(live, radar);
+        RadarReason.Text = reason;
+        RadarReason.Foreground = Brush(tone);
+
+        RadarFacts.Children.Clear();
+        AddFact(RadarFacts, Lang.T("radar_fact_module"),
+                Lang.T(radar.ModulePresent ? "radar_fact_target" : "radar_fact_nobody"));
+        AddFact(RadarFacts, Lang.T("radar_fact_distance"),
+                radar.ModulePresent && live.DistanceCm is > 0
+                    ? Lang.T("radar_cm", live.DistanceCm)
+                    : "—");
+        AddFact(RadarFacts, Lang.T("radar_fact_quiet"),
+                radar.NearMotionAgo is { } quiet && !NearMotionNow(radar)
+                    ? Ago(TimeSpan.FromSeconds(quiet))
+                    : "—");
+
+        var gates = Math.Max(radar.Moving.Length, radar.Static.Length);
+        while (_zones.Count < gates) _zones.Add(new ZoneView());
+        while (_zones.Count > gates) _zones.RemoveAt(_zones.Count - 1);
+        for (var i = 0; i < gates; i++)
+        {
+            var movingLimit = At(radar.MovingThresholds, i);
+            var staticLimit = i < NoStaticGates ? 100 : At(radar.StaticThresholds, i);
+            var ignored = movingLimit >= 100 && staticLimit >= 100;
+            var near = i < radar.NearGates;
+            _zones[i].Set(
+                Lang.T("radar_zone", i * GateCm, (i + 1) * GateCm),
+                near ? Lang.T("radar_near") : ignored ? Lang.T("radar_ignored") : "",
+                Brush(near ? "Accent" : "Dim"),
+                ignored ? 0.45 : 1,
+                BarView.Of(At(radar.Moving, i) ?? 0, movingLimit, Brush("Accent"), Brush("AccentDim")),
+                BarView.Of(At(radar.Static, i) ?? 0, staticLimit, Brush("Still"), Brush("StillDim")));
+        }
+
+        RadarLevels.Text = radar.LevelsHours is { } hours ? Lang.T("radar_levels", hours) : "";
+        RadarLevels.Visibility = radar.LevelsHours is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static int? At(int[] values, int index) => index < values.Length ? values[index] : null;
+
+    /// <summary>Есть ли движение у стола в этом отсчёте.</summary>
+    private static bool NearMotionNow(Radar radar)
+    {
+        for (var i = 0; i < radar.NearGates; i++)
+        {
+            if (At(radar.Moving, i) is { } energy
+                && At(radar.MovingThresholds, i) is { } limit
+                && energy >= limit)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Почему блок решил так, а не иначе.
+    /// </summary>
+    /// <remarks>
+    /// Повторяет правило Ld2410Source._at_desk на блоке и расходиться с ним
+    /// не должно: иначе страница объясняла бы решение, которого блок не
+    /// принимал.
+    /// </remarks>
+    private static (string Text, string Tone) ExplainPresence(Live live, Radar radar)
+    {
+        if (radar.NearMotionAgo is not { } quiet)
+            return (Lang.T("radar_reason_no_rule"), "Warn");
+        if (!radar.ModulePresent)
+            return (Lang.T("radar_reason_empty"), "Dim");
+        if (NearMotionNow(radar))
+            return (Lang.T("radar_reason_motion_now"), "Ok");
+
+        var since = TimeSpan.FromSeconds(quiet);
+        if (live.Presence)
+        {
+            // Пара секунд тишины — это человек, который замер, а не повод
+            // рассказывать про удержание.
+            if (quiet < 10) return (Lang.T("radar_reason_motion", Ago(since)), "Ok");
+            var left = TimeSpan.FromSeconds(Math.Max(0, radar.HoldSeconds - quiet));
+            return (Lang.T("radar_reason_still", Ago(since), Ago(left)), "Fg");
+        }
+
+        // Модуль цель видит, а блок человека не засчитал — значит, держит
+        // дальняя зона. Называем самую громкую: это первое, что захочется
+        // знать, чтобы найти виновника.
+        var gates = Math.Max(radar.Moving.Length, radar.Static.Length);
+        var far = Enumerable.Range(radar.NearGates, Math.Max(0, gates - radar.NearGates))
+            .OrderByDescending(g => Math.Max(At(radar.Moving, g) ?? 0, At(radar.Static, g) ?? 0))
+            .Select(g => (int?)g)
+            .FirstOrDefault();
+        var zone = far is { } g ? Lang.T("radar_zone", g * GateCm, (g + 1) * GateCm) : "—";
+        return (Lang.T("radar_reason_ghost", Ago(since), zone), "Warn");
     }
 
     // -------------------------------------------------------- компьютер

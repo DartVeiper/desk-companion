@@ -35,6 +35,26 @@ public sealed class Live
     public bool Ld2410Ok;
     public List<(string Label, string Detail, bool Critical)> Problems = new();
     public int? DistanceCm;
+    public Radar? Radar;
+}
+
+/// <summary>Радар по зонам. Поля повторяют раздел radar в /api/live.</summary>
+public sealed class Radar
+{
+    /// <summary>Что говорит сам модуль: есть ли цель где-нибудь в комнате.</summary>
+    public bool ModulePresent;
+    public int[] Moving = Array.Empty<int>();
+    public int[] Static = Array.Empty<int>();
+    public int[] MovingThresholds = Array.Empty<int>();
+    public int[] StaticThresholds = Array.Empty<int>();
+    /// <summary>Сколько ближних зон считаются «у стола».</summary>
+    public int NearGates = 2;
+    public double HoldSeconds = 180;
+    /// <summary>Сколько секунд назад было движение у стола. null — правило не работает.</summary>
+    public double? NearMotionAgo;
+    /// <summary>Присутствие держала дальняя зона, и правило его сняло.</summary>
+    public bool Ghost;
+    public double? LevelsHours;
 }
 
 /// <summary>Сводка за день. Поля повторяют /api/today.</summary>
@@ -157,7 +177,22 @@ public sealed class Board
         };
 
         if (root.TryGetProperty("radar", out var radar) && radar.ValueKind == JsonValueKind.Object)
+        {
             live.DistanceCm = Int(radar, "distance_cm");
+            live.Radar = new Radar
+            {
+                ModulePresent = Bool(radar, "present"),
+                Moving = Ints(radar, "moving_gates"),
+                Static = Ints(radar, "static_gates"),
+                MovingThresholds = Ints(radar, "moving_thresholds"),
+                StaticThresholds = Ints(radar, "static_thresholds"),
+                NearGates = Int(radar, "near_gates") ?? 2,
+                HoldSeconds = Double(radar, "hold_seconds") ?? 180,
+                NearMotionAgo = Double(radar, "near_motion_ago"),
+                Ghost = Bool(radar, "ghost"),
+                LevelsHours = Double(radar, "levels_hours"),
+            };
+        }
 
         if (root.TryGetProperty("problems", out var problems))
             foreach (var item in problems.EnumerateArray())
@@ -394,4 +429,11 @@ public sealed class Board
 
     private static bool Bool(JsonElement parent, string name) =>
         parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
+    private static int[] Ints(JsonElement parent, string name) =>
+        parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array
+            ? v.EnumerateArray()
+               .Select(x => x.ValueKind == JsonValueKind.Number ? (int)x.GetDouble() : 0)
+               .ToArray()
+            : Array.Empty<int>();
 }

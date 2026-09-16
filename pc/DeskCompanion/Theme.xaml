@@ -25,6 +25,15 @@
     <SolidColorBrush x:Key="Warn" Color="{StaticResource WarnColor}"/>
     <SolidColorBrush x:Key="Alert" Color="{StaticResource AlertColor}"/>
 
+    <!-- Полоски радара. На самих часах их нет, поэтому здесь своя пара к
+         палитре: движение — акцентом, неподвижное присутствие — фиолетовым.
+         Тусклые варианты — сигнал ниже порога: так перешедшая черту зона
+         видна сразу, без сравнения чисел. -->
+    <SolidColorBrush x:Key="Track" Color="#FF20242C"/>
+    <SolidColorBrush x:Key="AccentDim" Color="#FF2F4460"/>
+    <SolidColorBrush x:Key="Still" Color="#FFB89CFF"/>
+    <SolidColorBrush x:Key="StillDim" Color="#FF3F3858"/>
+
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
 
     <!-- Карточка. Один стиль на все плитки: как только их станет двадцать,

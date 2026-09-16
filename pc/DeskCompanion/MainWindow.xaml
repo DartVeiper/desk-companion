@@ -52,10 +52,12 @@
                                  Content="{l:T nav_screens}" Checked="Nav_Checked" Tag="1"/>
                     <RadioButton x:Name="NavStats" Style="{StaticResource NavButton}"
                                  Content="{l:T nav_stats}" Checked="Nav_Checked" Tag="2"/>
+                    <RadioButton x:Name="NavRadar" Style="{StaticResource NavButton}"
+                                 Content="{l:T nav_radar}" Checked="Nav_Checked" Tag="3"/>
                     <RadioButton x:Name="NavComputer" Style="{StaticResource NavButton}"
-                                 Content="{l:T nav_computer}" Checked="Nav_Checked" Tag="3"/>
+                                 Content="{l:T nav_computer}" Checked="Nav_Checked" Tag="4"/>
                     <RadioButton x:Name="NavSettings" Style="{StaticResource NavButton}"
-                                 Content="{l:T nav_settings}" Checked="Nav_Checked" Tag="4"/>
+                                 Content="{l:T nav_settings}" Checked="Nav_Checked" Tag="5"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -348,6 +350,139 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ================================================= радар -->
+            <!-- Что видит радар и почему блок решил так, а не иначе. Без этой
+                 страницы вопрос «почему часы считают, что я за столом, когда
+                 меня нет» решался только чтением журнала на самом блоке. -->
+            <ScrollViewer x:Name="PageRadar" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="{l:T nav_radar}" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,18"
+                               Text="{l:T radar_hint}"/>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{l:T radar_verdict_title}" Style="{StaticResource CardTitle}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="RadarDot" Width="10" Height="10"
+                                         Fill="{StaticResource Dim}" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="RadarVerdict" Text="—" Margin="10,0,0,0"
+                                           Style="{StaticResource Metric}" FontSize="22"/>
+                            </StackPanel>
+                            <TextBlock x:Name="RadarReason" Style="{StaticResource Body}"
+                                       Margin="20,6,0,0" TextWrapping="Wrap"/>
+                            <UniformGrid x:Name="RadarFacts" Columns="3" Rows="1" Margin="0,16,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T radar_zones_title}" Style="{StaticResource CardTitle}"/>
+                            <WrapPanel Margin="0,0,0,10">
+                                <Border Width="10" Height="10" CornerRadius="2"
+                                        Background="{StaticResource Accent}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{l:T radar_legend_moving}" Style="{StaticResource Caption}"
+                                           VerticalAlignment="Center" Margin="6,0,18,0"/>
+                                <Border Width="10" Height="10" CornerRadius="2"
+                                        Background="{StaticResource Still}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{l:T radar_legend_static}" Style="{StaticResource Caption}"
+                                           VerticalAlignment="Center" Margin="6,0,18,0"/>
+                                <Rectangle Width="2" Height="12" Fill="{StaticResource Fg}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="{l:T radar_legend_threshold}" Style="{StaticResource Caption}"
+                                           VerticalAlignment="Center" Margin="6,0,0,0"/>
+                            </WrapPanel>
+                            <ItemsControl x:Name="ZoneList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,3" Opacity="{Binding Opacity}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="112"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="40"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Label}" FontSize="13"
+                                                           Foreground="{StaticResource Fg}"/>
+                                                <TextBlock Text="{Binding Role}" FontSize="10"
+                                                           Foreground="{Binding RoleBrush}"/>
+                                            </StackPanel>
+                                            <Grid Grid.Column="1" VerticalAlignment="Center">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="14"/>
+                                                    <RowDefinition Height="14"/>
+                                                </Grid.RowDefinitions>
+                                            <Border Grid.Row="0" Height="6" CornerRadius="3"
+                                                    Background="{StaticResource Track}"/>
+                                            <Grid Grid.Row="0" Height="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="{Binding Moving.Fill}"/>
+                                                    <ColumnDefinition Width="{Binding Moving.Rest}"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border CornerRadius="3" Background="{Binding Moving.Brush}"/>
+                                            </Grid>
+                                            <Grid Grid.Row="0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="{Binding Moving.Mark}"/>
+                                                    <ColumnDefinition Width="{Binding Moving.MarkRest}"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Rectangle Grid.Column="1" Width="2" Margin="-1,1,0,1"
+                                                           HorizontalAlignment="Left"
+                                                           Fill="{StaticResource Fg}"
+                                                           Visibility="{Binding Moving.MarkShown}"/>
+                                            </Grid>
+                                            <Border Grid.Row="1" Height="6" CornerRadius="3"
+                                                    Background="{StaticResource Track}"/>
+                                            <Grid Grid.Row="1" Height="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="{Binding Static.Fill}"/>
+                                                    <ColumnDefinition Width="{Binding Static.Rest}"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border CornerRadius="3" Background="{Binding Static.Brush}"/>
+                                            </Grid>
+                                            <Grid Grid.Row="1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="{Binding Static.Mark}"/>
+                                                    <ColumnDefinition Width="{Binding Static.MarkRest}"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Rectangle Grid.Column="1" Width="2" Margin="-1,1,0,1"
+                                                           HorizontalAlignment="Left"
+                                                           Fill="{StaticResource Fg}"
+                                                           Visibility="{Binding Static.MarkShown}"/>
+                                            </Grid>
+                                            </Grid>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Moving.Text}" Height="14"
+                                                           FontSize="10" TextAlignment="Right"
+                                                           Foreground="{StaticResource Dim}"/>
+                                                <TextBlock Text="{Binding Static.Text}" Height="14"
+                                                           FontSize="10" TextAlignment="Right"
+                                                           Foreground="{StaticResource Dim}"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T radar_how_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Style="{StaticResource Body}" TextWrapping="Wrap"
+                                       Text="{l:T radar_how_1}"/>
+                            <TextBlock Style="{StaticResource Body}" TextWrapping="Wrap"
+                                       Margin="0,8,0,0" Text="{l:T radar_how_2}"/>
+                            <TextBlock Style="{StaticResource Body}" TextWrapping="Wrap"
+                                       Margin="0,8,0,0" Text="{l:T radar_how_3}"/>
+                            <TextBlock x:Name="RadarLevels" Style="{StaticResource Caption}"
+                                       Margin="0,10,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
