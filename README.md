@@ -9,7 +9,7 @@ weather, watches the air in the room, knows whether you are at your desk,
 and keeps track of what you do on your computer. One case, one power cable.
 
 Everything is drawn and tested **without the hardware**: screens render in a
-browser, sensors are replaced by stubs, and 446 checks run on any machine
+browser, sensors are replaced by stubs, and 462 checks run on any machine
 with Python. Only debugged code goes to the board.
 
 ---
@@ -152,7 +152,8 @@ The radar does not need calibration on the spot — it needs a day of
 observation. The device counts how often each zone reported each energy
 level, and over a day a room is both empty and occupied. The command derives
 the thresholds from what accumulated. You do not need to leave the room or
-stop the service.
+stop the service. How many hours have accumulated so far is shown at the
+bottom of the Radar page in the app.
 
 ### 5. Autostart
 
@@ -170,11 +171,26 @@ seventeen seconds after power-on.
 
 <img src="docs/app.png" width="720" alt="The app">
 
-`pc/DeskCompanion` is a .NET 8 window: overview, screen list, statistics,
-the agent, settings. It lives in the tray, waits for the device and picks it
-up the moment it appears on the network. The interface is in English or
-Russian — the choice in the settings switches the device screen too.
-Adding a language is one file in `pc/DeskCompanion/Strings`.
+`pc/DeskCompanion` is one .NET 8 program: the window and the collection of
+data from the computer. Its pages are the overview, the screen list,
+statistics, the radar, the computer and settings. It lives in the tray,
+waits for the device and picks it up the moment it appears on the network —
+and if the device changes its address, the app finds it on the network by
+itself. The interface is in English or Russian; the choice in the settings
+switches the device screen too. Adding a language is one file in
+`pc/DeskCompanion/Strings`.
+
+**Collection** — keystrokes and clicks, CPU and GPU load and temperatures,
+the active window and the current track — runs in the background and goes to
+the device over MQTT. Only the number of keystrokes is counted: which keys
+were pressed, the app never sees. One checkbox on the Computer page turns
+it off, and the same page shows what is collected and with which rights.
+
+**The Radar page** explains why the device thinks you are at the desk or
+not: "motion near the desk 4 s ago", or "no motion near the desk for 3 min,
+while the radar still sees a target in the 150–225 cm zone". Below are the
+nine zones, each with a motion bar, a still-presence bar and the trigger
+threshold — a zone that crossed it lights up.
 
 It deliberately has no counting logic of its own: the metrics and the screen
 list live on the device, which also keeps the database. A second copy of the
@@ -185,42 +201,34 @@ Once a day the app pulls the measurement database down to itself. This is
 not a luxury: the history lives on a memory card in a single copy, and cards
 are consumables that die without warning.
 
-`agent/` is the second component. It reads keystrokes, load, temperatures,
-the active window and the current track from the computer and sends them to
-the device over MQTT. **It has no window at all** — not even a console. What
-it is doing, its log, a start and stop button and a look at what it sees
-are all on the app's Agent page, and the app brings it back if it crashes.
+The prebuilt program is on the [releases page](../../releases): one file,
+download and run. You do not need to install .NET — the runtime is inside.
 
-Prebuilt programs are on the [releases page](../../releases): two files,
-download and run. **Keep them in one folder** — the app finds the agent
-next to itself. You do not need to install .NET — the runtime is inside.
+**Autostart** is the "Start with Windows" checkbox in Settings. It creates a
+Scheduled Task with the highest privileges: without administrator rights
+LibreHardwareMonitor cannot read temperatures, and ordinary autostart would
+mean a UAC prompt at every single login. This way Windows asks once — when
+you tick the box — and from then on the app starts with those rights
+silently.
 
-To build them yourself (needs the
+To build it yourself (needs the
 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)):
 
 ```
 powershell -ExecutionPolicy Bypass -File pc\build.ps1
 ```
 
-Both land in a folder named `Программа` next to the project, along with a
+It lands in a folder named `Программа` next to the project, along with a
 desktop shortcut. The separate folder is not decoration: dotnet's own output
 path looks like `bin\Release\net8.0-windows\win-x64\publish\`, which is
 impossible to remember and impossible to find.
 
-Autostart for both is one script, run as administrator:
+What exactly is collected, where the files live and how the rights work —
+[ПРИЛОЖЕНИЕ.md](ПРИЛОЖЕНИЕ.md) (Russian).
 
-```
-powershell -ExecutionPolicy Bypass -File pc\autostart.ps1
-```
-
-The two use different mechanisms, and not out of laziness. The app is an
-ordinary user program, so the Run registry key is enough: it can be edited
-without elevation and it shows up in Task Manager, which means the user can
-disable it without us. The agent needs administrator rights — without them
-LibreHardwareMonitor cannot read temperatures — and through the Run key that
-would mean a UAC prompt at every single login. So the agent goes in as a
-Scheduled Task with highest privileges, which starts silently. To undo all
-of it, run the same script with `-Remove`.
+**Before version 0.3.0** there were two programs on the PC — the window and
+an agent. The new app removes the agent by itself: its task, its process and
+its sensor driver. A leftover `DeskAgent.exe` can be deleted.
 
 ---
 
@@ -233,7 +241,8 @@ of it, run the same script with `-Remove`.
 | The radar is silent | `python3 tools/radar_wake.py`. The module can get stuck in configuration mode, and **rebooting the board does not fix it**: 5 V never drops during a reboot |
 | The air sensor answers but returns zeros | pull the power physically, from the wall. Same reason: a reboot does not de-energise the modules |
 | Touch needs a hard press | the "touch sensitivity" slider in the app or the browser, to the right. Underneath it is `max_resistance` in `[touch]`: resistance is inverse to force, so a low threshold is what means "press harder" |
-| The device reports presence in an empty room | first, the radar thresholds — see step 4. If the log says `the desk has had no motion for 3 min, but zone N is holding presence`, something moves at that distance: a curtain, a fan, a person behind a door — a 24 GHz radar sees through thin walls. Presence is held only by motion near the desk, so such a thing can no longer keep "at the desk" on for more than three minutes |
+| The device reports presence in an empty room | open the Radar page in the app: it says why the device decided so and shows which zone crossed its threshold. If a far zone is holding presence, something moves at that distance: a curtain, a fan, a person behind a door — a 24 GHz radar sees through thin walls. Presence is held only by motion near the desk, so such a thing cannot keep "at the desk" on for more than three minutes. If a zone near the desk lights up, it is the radar thresholds — see step 4 |
+| The app says "no connection" | Settings → "Find on the network": the app walks its subnet and remembers the device's address. "The device answers, but its service is not running" means the service on the device is restarting or has crashed — see `journalctl -u desk-companion -b` |
 | The service started but something is missing | `journalctl -u desk-companion -b` prints which module failed to come up and why |
 
 ---
@@ -258,7 +267,7 @@ Checks worth running after any interface change:
 | `py tools/walk_menu.py` | walks every state of the menu: dead ends, and places more than three actions away from the carousel |
 | `py ../pc/check_strings.py` | a string missing from one of the desktop app's languages, or a translation that lost a `{0}` — which does not crash, it just prints the sentence without the number |
 | `py tools/latency.py` | what the delay from "the sensor saw it" to "it is on screen" is made of |
-| six `test_*.py` files | 446 checks, all without hardware |
+| six `test_*.py` files | 462 checks, all without hardware |
 
 ---
 
@@ -274,6 +283,11 @@ pi/app/
   sources/       sensors, weather, MQTT, device health; each with its own period
   drivers/       protocols: LD2410, SCD41, XPT2046, the encoder
   display/       two backends — SPI and PNG — behind one interface
+
+pc/DeskCompanion/
+  Collection/    collection from the PC: windows, input, audio, track, sensors, MQTT
+  Services/      talking to the device, network search, autostart, settings, languages
+  Strings/       the window's text, one file per language
 ```
 
 Two principles, from which the rest follows.
