@@ -112,8 +112,12 @@ foreach ($name in $stopped) {
     if (-not (Test-Path $exe)) { continue }
     if ($name -eq "DeskCompanion") {
         Start-Process $exe -ArgumentList "--tray"
+    } elseif (Get-ScheduledTask -TaskName "DeskCompanion Agent" -ErrorAction SilentlyContinue) {
+        # Через задачу, а не напрямую: так агент получает те же права, что
+        # и при входе в систему, и проверка после сборки честная.
+        Start-ScheduledTask -TaskName "DeskCompanion Agent"
     } else {
-        Start-Process $exe -WindowStyle Hidden
+        Start-Process $exe
     }
     Write-Host "  запущено обратно: $name"
 }

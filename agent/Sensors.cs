@@ -85,7 +85,7 @@ public static class ActiveWindow
     /// </summary>
     public static IEnumerable<string> Describe()
     {
-        yield return $"{"процесс",-34} {"занятие",-9} путь";
+        yield return $"{Text.T("col_process"),-34} {Text.T("col_category"),-9} {Text.T("col_path")}";
         yield return new string('-', 100);
         foreach (var process in Process.GetProcesses()
                      .Where(p => p.MainWindowHandle != IntPtr.Zero)
@@ -93,10 +93,10 @@ public static class ActiveWindow
         {
             var path = PathOf(process);
             var category = Known.TryGetValue(process.ProcessName, out var known)
-                ? known + " (по списку)"
+                ? known + Text.T("by_list")
                 : Guess(process.ProcessName, path);
             yield return $"{process.ProcessName,-34} {category,-9} "
-                         + (path.Length > 0 ? path : "путь не виден");
+                         + (path.Length > 0 ? path : Text.T("no_path"));
         }
     }
 

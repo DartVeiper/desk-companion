@@ -1,4 +1,8 @@
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using MQTTnet;
 using MQTTnet.Client;
 
@@ -12,6 +16,11 @@ namespace DeskAgent;
 /// Периоды взяты из п.3 плана и подобраны так, чтобы не топить ни сеть, ни
 /// базу: агрегаты ввода раз в минуту, а не по событию; звук раз в секунду;
 /// железо раз в две; heartbeat раз в тридцать.
+///
+/// Окна у агента нет. Раньше это было консольное приложение, и его окно
+/// висело на экране с момента входа в систему. Теперь он пишет в журнал и в
+/// файл состояния, а показывает их и управляет агентом приложение
+/// DeskCompanion — для человека это одна программа.
 /// </remarks>
 internal static class Program
 {
@@ -23,26 +32,20 @@ internal static class Program
     private const string TopicMedia = "home/pc/media";
 
     private static readonly TimeSpan AfkAfter = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan StatusEvery = TimeSpan.FromSeconds(10);
 
     private static async Task<int> Main(string[] args)
     {
-        // Русский вывод и буферизация. Двух строк тут мало, нужны обе:
-        //
-        // OutputEncoding переключает кодовую страницу самого окна консоли —
-        // без этого текст в окне превращается в крякозябры.
-        //
-        // SetOut нужен отдельно, потому что при перенаправлении в файл или в
-        // конвейер окна нет вовсе, и кодировку приходится задавать самому
-        // потоку. AutoFlush там же: без него последние строки остаются в
-        // буфере и пропадают, если агента закрыли — а закрывают его как раз
-        // тогда, когда эти строки и надо прочитать.
-        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }
-        var stdout = new StreamWriter(Console.OpenStandardOutput(),
-                                      new System.Text.UTF8Encoding(false)) { AutoFlush = true };
-        var stderr = new StreamWriter(Console.OpenStandardError(),
-                                      new System.Text.UTF8Encoding(false)) { AutoFlush = true };
-        Console.SetOut(stdout);
-        Console.SetError(stderr);
+        // Настройки приложения читаем первым делом: из них и адрес блока, и
+        // язык, на котором писать журнал и разведку.
+        var app = ReadAppSettings();
+        Text.Use(app.Language);
+
+        var diagnostics = args.Contains("--windows") || args.Contains("--list-sensors");
+        if (diagnostics || args.Contains("--console"))
+        {
+            ConnectConsole();
+        }
 
         if (args.Contains("--windows"))
         {
@@ -58,9 +61,8 @@ internal static class Program
             var (_, load, _, _) = gpu.Read();
             var (name, _, verdict) = ActiveWindow.Current(load);
             Console.WriteLine();
-            Console.WriteLine($"  впереди сейчас: {name} -> {verdict}"
-                              + $" (видеокарта {load?.ToString("0") ?? "?"}%)");
-            Console.WriteLine($"  исключения читаются из {Overrides.Path}");
+            Console.WriteLine(Text.T("front_now", name, verdict, load?.ToString("0") ?? "?"));
+            Console.WriteLine(Text.T("overrides_from", Overrides.Path));
             return 0;
         }
 
@@ -72,27 +74,61 @@ internal static class Program
             // получить пустое поле на чужой машине.
             using var probe = new HardwareMonitor();
             foreach (var line in probe.Describe()) Console.WriteLine(line);
-            Console.WriteLine(probe.SensorsAvailable
-                ? "\nтемпературы доступны"
-                : "\nтемператур нет — нужен запуск от администратора");
+            Console.WriteLine(Text.T(probe.SensorsAvailable ? "temps_ok" : "temps_none"));
             return 0;
         }
 
-        var host = Argument(args, "--host") ?? "deskpi.local";
+        // Один агент на сеанс. Второй — например, запущенный руками, пока
+        // работает поднятый планировщиком, — слал бы те же топики вперемешку
+        // с первым, и блок показывал бы то одно, то другое число нажатий.
+        Mutex? single;
+        try
+        {
+            single = new Mutex(true, @"Local\DeskCompanion.Agent", out var first);
+            if (!first)
+            {
+                Log.Info(Text.T("already_running"));
+                return 0;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Мьютекс есть, но создан процессом с другими правами — значит
+            // агент тоже уже работает.
+            Log.Info(Text.T("already_running_rights"));
+            return 0;
+        }
+
+        using var owned = single;
+
+        // Адрес блока берём из настроек приложения, если его не дали явно.
+        // Раньше планировщик запускал агента без адреса, и тот искал блок по
+        // имени deskpi.local — а оно из Windows резолвится через раз. Теперь
+        // приложение и агент смотрят в одно место и не могут разойтись.
+        var host = Argument(args, "--host") ?? app.Host ?? "deskpi.local";
         var port = int.TryParse(Argument(args, "--port"), out var p) ? p : 1883;
 
-        Console.WriteLine($"Desk Companion — агент ПК");
-        Console.WriteLine($"  брокер: {host}:{port}");
+        var status = new AgentStatus
+        {
+            Host = host,
+            Port = port,
+            Elevated = IsElevated(),
+        };
+
+        if (Argument(args, "--host") is null) app.Report();
+        Log.Info(Text.T(status.Elevated ? "start_admin" : "start_user", host, port));
 
         using var input = new InputCounter();
         using var audio = new AudioMonitor();
         var media = new NowPlaying();
         using var hardware = new HardwareMonitor();
 
+        status.InputHooks = input.Installed;
         if (!input.Installed)
         {
-            Console.Error.WriteLine("  не удалось поставить хуки ввода — нажатия считаться не будут");
+            Log.Error(Text.T("no_hooks"));
         }
+        status.Save();
 
         var factory = new MqttFactory();
         using var client = factory.CreateMqttClient();
@@ -107,10 +143,12 @@ internal static class Program
 
         using var stopping = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; stopping.Cancel(); };
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => stopping.Cancel();
 
         var lastMinute = DateTime.UtcNow;
         var lastHardware = DateTime.MinValue;
         var lastHeartbeat = DateTime.MinValue;
+        var lastStatus = DateTime.MinValue;
         var lastApp = "";
         // Последняя известная загрузка видеокарты. Нужна разбору окна:
         // полноэкранное окно с загруженной видеокартой — это игра, и это
@@ -122,6 +160,7 @@ internal static class Program
         var lastTrack = "";
         var lastAudio = (bool?)null;
         var warnedAboutRights = false;
+        var reportedFailure = "";
 
         while (!stopping.IsCancellationRequested)
         {
@@ -129,20 +168,40 @@ internal static class Program
             {
                 if (!client.IsConnected)
                 {
+                    if (status.Connected)
+                    {
+                        status.Connected = false;
+                        status.Save();
+                    }
                     try
                     {
                         await client.ConnectAsync(options, stopping.Token);
-                        Console.WriteLine("  подключено");
+                        Log.Info(Text.T("connected", host, port));
+                        status.Connected = true;
+                        status.LastError = null;
+                        reportedFailure = "";
+                        status.Save();
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        // Самая частая причина — не брокер, а имя: deskpi.local
-                        // из Windows резолвится через раз. Сказать об этом
-                        // здесь дешевле, чем дать человеку искать самому.
-                        Console.Error.WriteLine($"  не подключиться к {host}:{port} — {ex.Message}");
-                        Console.Error.WriteLine("  если это deskpi.local, попробуй адрес: " +
-                                                "DeskAgent.exe --host 192.168.1.205");
-                        throw;
+                        // Одна и та же ошибка повторяется каждые пять секунд,
+                        // пока блок недоступен. В журнал — только первая: иначе
+                        // за ночь без блока он состоял бы из неё одной.
+                        var failure = Text.T("connect_failed", host, port, ex.Message);
+                        if (failure != reportedFailure)
+                        {
+                            reportedFailure = failure;
+                            Log.Error(failure);
+                            if (host.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Самая частая причина — не брокер, а имя:
+                                // *.local из Windows резолвится через раз.
+                                Log.Error(Text.T("local_names"));
+                            }
+                        }
+                        status.LastError = failure;
+                        status.Save();
+                        throw new ConnectFailed();
                     }
                 }
 
@@ -206,14 +265,17 @@ internal static class Program
                         cpu_load = cpuLoad,
                     }), true, stopping.Token);
 
+                    if (status.Sensors != hardware.SensorsAvailable)
+                    {
+                        status.Sensors = hardware.SensorsAvailable;
+                        status.Save();
+                    }
                     if (!hardware.SensorsAvailable && !warnedAboutRights)
                     {
                         warnedAboutRights = true;
                         // П.6 плана: без прав администратора Режим 5 остаётся
                         // пустым молча. Пусть хотя бы здесь будет сказано.
-                        Console.Error.WriteLine(
-                            "  датчики температуры недоступны — запусти от администратора, " +
-                            "иначе Режим 5 на блоке будет пустым");
+                        Log.Error(Text.T("no_temps"));
                     }
                 }
 
@@ -224,6 +286,15 @@ internal static class Program
                     // выключения ПК врала бы, что агент жив.
                     await Publish(client, TopicHeartbeat,
                         DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), false, stopping.Token);
+                }
+
+                // Метка «жив» для приложения. По ней оно отличает работающего
+                // агента от зависшего: процесс может существовать и ничего не
+                // делать, а обновляемая метка — нет.
+                if (now - lastStatus >= StatusEvery)
+                {
+                    lastStatus = now;
+                    status.Save();
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), stopping.Token);
@@ -237,14 +308,35 @@ internal static class Program
                 // Обрыв сети или перезагрузка Pi не должны ронять агента:
                 // п.9 требует, чтобы после выключения роутера на минуту всё
                 // вернулось само.
-                Console.Error.WriteLine($"  {ex.GetType().Name}: {ex.Message}");
+                //
+                // Неудачное подключение уже записано там, где случилось, и с
+                // понятным текстом, — второй раз его не пишем.
+                if (ex is not ConnectFailed)
+                {
+                    var failure = $"{ex.GetType().Name}: {ex.Message}";
+                    if (failure != reportedFailure)
+                    {
+                        reportedFailure = failure;
+                        Log.Error(failure);
+                    }
+                    // Публикация упала — значит, связь с брокером порвалась,
+                    // даже если клиент ещё об этом не знает.
+                    status.Connected = client.IsConnected;
+                    status.LastError = failure;
+                    status.Save();
+                }
                 try { await Task.Delay(TimeSpan.FromSeconds(5), stopping.Token); }
                 catch (OperationCanceledException) { break; }
             }
         }
 
-        if (client.IsConnected) await client.DisconnectAsync();
-        Console.WriteLine("  остановлен");
+        if (client.IsConnected)
+        {
+            try { await client.DisconnectAsync(); } catch { }
+        }
+        status.Connected = false;
+        status.Save();
+        Log.Info(Text.T("stopped"));
         return 0;
     }
 
@@ -262,9 +354,143 @@ internal static class Program
         return client.PublishAsync(message, token);
     }
 
+    /// <summary>Подключение не удалось; причина уже в журнале.</summary>
+    private sealed class ConnectFailed : Exception
+    {
+    }
+
     private static string? Argument(string[] args, string name)
     {
         var index = Array.IndexOf(args, name);
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+
+    /// <summary>Что агенту нужно из настроек приложения.</summary>
+    private sealed record AppSettings(string? Host, string? Language, string Path, Exception? Error)
+    {
+        /// <summary>
+        /// Сказать в журнал, почему адреса нет. Молча откатываться на
+        /// deskpi.local нельзя: именно так агент однажды и уехал на имя,
+        /// которое из Windows находится через раз, хотя адрес цифрами лежал в
+        /// настройках, — и понять это было не по чему.
+        /// </summary>
+        public void Report()
+        {
+            if (Host is not null) return;
+            if (Error is null or FileNotFoundException or DirectoryNotFoundException)
+            {
+                // Обычное дело для свежей установки: адрес ещё не задавали.
+                Log.Info(Text.T("no_host"));
+            }
+            else
+            {
+                Log.Error(Text.T("settings_unreadable", Path, Error.Message));
+            }
+        }
+    }
+
+    private static AppSettings ReadAppSettings()
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData,
+                                      Environment.SpecialFolderOption.DoNotVerify),
+            "DeskCompanion", "settings.json");
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return new AppSettings(Field(doc.RootElement, "Host"),
+                                   Field(doc.RootElement, "Language"), path, null);
+        }
+        catch (Exception error)
+        {
+            return new AppSettings(null, null, path, error);
+        }
+    }
+
+    private static string? Field(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+            return null;
+        var text = value.GetString()?.Trim();
+        return string.IsNullOrEmpty(text) ? null : text;
+    }
+
+    private static bool IsElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // --------------------------------------------------------- консоль
+
+    private const int AttachParentProcess = -1;
+    private const int StdOutputHandle = -11;
+    private const uint GenericWrite = 0x40000000;
+    private const uint FileShareWrite = 0x2;
+    private const uint OpenExisting = 3;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(int processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetStdHandle(int handle);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share,
+                                             IntPtr security, uint disposition,
+                                             uint flags, IntPtr template);
+
+    /// <summary>
+    /// Вывод для разведки и отладки.
+    /// </summary>
+    /// <remarks>
+    /// У программы без окна консоли своей нет, и печать уходит в никуда. Два
+    /// случая, когда вывод всё-таки нужен.
+    ///
+    /// Выход перенаправлен — приложение запустило разведку и читает ответ,
+    /// или человек написал <c>| more</c>. Тогда поток уже есть, пишем в него.
+    ///
+    /// Агента запустили из терминала руками. Тогда пристраиваемся к консоли
+    /// этого терминала. Стандартные потоки при этом не появляются сами —
+    /// Windows не выдаёт их программам без окна, — и консоль приходится
+    /// открывать по имени.
+    /// </remarks>
+    private static void ConnectConsole()
+    {
+        var utf8 = new UTF8Encoding(false);
+        var handle = GetStdHandle(StdOutputHandle);
+        var redirected = handle != IntPtr.Zero && handle != new IntPtr(-1);
+
+        if (redirected)
+        {
+            Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true });
+            Console.SetError(new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true });
+            return;
+        }
+
+        if (!AttachConsole(AttachParentProcess)) return;
+
+        var console = CreateFileW("CONOUT$", GenericWrite, FileShareWrite,
+                                  IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+        if (console == IntPtr.Zero || console == new IntPtr(-1)) return;
+
+        try { Console.OutputEncoding = utf8; } catch { }
+        var writer = new StreamWriter(
+            new FileStream(new SafeFileHandle(console, ownsHandle: true), FileAccess.Write), utf8)
+        {
+            AutoFlush = true,
+        };
+        Console.SetOut(writer);
+        Console.SetError(writer);
+        // Терминал не ждёт программу без окна и уже напечатал приглашение —
+        // начинаем с новой строки, чтобы не писать поверх него.
+        Console.WriteLine();
     }
 }

@@ -83,6 +83,21 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -Settings $settings -RunLevel Highest -Force | Out-Null
+
+# Право запускать задачу — самому пользователю. По умолчанию у него есть
+# только право на неё смотреть, а запускать может лишь администратор. Но
+# приложение, работающее без прав, поднимает агента именно этой задачей:
+# без этой строчки кнопка «Запустить» и слежение за агентом не работали бы
+# ни у кого, у кого включён контроль учётных записей, — то есть почти у всех.
+$service = New-Object -ComObject Schedule.Service
+$service.Connect()
+$registered = $service.GetFolder("\").GetTask($taskName)
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$sddl = $registered.GetSecurityDescriptor(0xF)
+$ace = "(A;;FRFX;;;$sid)"
+if (-not $sddl.Contains($ace)) {
+    $registered.SetSecurityDescriptor($sddl + $ace, 0)
+}
 Write-Host "  агент: задача «$taskName» создана, стартует при входе"
 
 # Приложение — обычной веткой Run, свёрнутым в трей.
