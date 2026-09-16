@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using DeskCompanion.Services;
 using LibreHardwareMonitor.Hardware;
 using NAudio.CoreAudioApi;
 
-namespace DeskAgent;
+namespace DeskCompanion.Collection;
 
 /// <summary>
 /// Активное окно и его категория.
@@ -77,7 +78,7 @@ public static class ActiveWindow
     }
 
     /// <summary>
-    /// Как агент видит каждое окно на экране.
+    /// Как сборщик видит каждое окно на экране.
     ///
     /// Нужно, чтобы вопрос «почему часы считают, что я занят прочим»
     /// решался за десять секунд, а не перебором догадок: видно и имя
@@ -85,7 +86,7 @@ public static class ActiveWindow
     /// </summary>
     public static IEnumerable<string> Describe()
     {
-        yield return $"{Text.T("col_process"),-34} {Text.T("col_category"),-9} {Text.T("col_path")}";
+        yield return $"{Lang.T("probe_col_process"),-34} {Lang.T("probe_col_category"),-9} {Lang.T("probe_col_path")}";
         yield return new string('-', 100);
         foreach (var process in Process.GetProcesses()
                      .Where(p => p.MainWindowHandle != IntPtr.Zero)
@@ -93,10 +94,10 @@ public static class ActiveWindow
         {
             var path = PathOf(process);
             var category = Known.TryGetValue(process.ProcessName, out var known)
-                ? known + Text.T("by_list")
+                ? known + Lang.T("probe_by_list")
                 : Guess(process.ProcessName, path);
             yield return $"{process.ProcessName,-34} {category,-9} "
-                         + (path.Length > 0 ? path : Text.T("no_path"));
+                         + (path.Length > 0 ? path : Lang.T("probe_no_path"));
         }
     }
 
@@ -268,7 +269,7 @@ public sealed class InputCounter : IDisposable
         _pump = new Thread(PumpLoop)
         {
             IsBackground = true,
-            Name = "desk-agent-input-hooks",
+            Name = "desk-input-hooks",
         };
         _pump.Start();
         _ready.Wait(TimeSpan.FromSeconds(5));
@@ -374,13 +375,19 @@ public sealed class AudioMonitor : IDisposable
 /// Температуры и загрузка через LibreHardwareMonitor.
 /// </summary>
 /// <remarks>
-/// Ради этого агент и написан на C#: LHM — .NET-библиотека, и здесь она
+/// Ради этого сбор и написан на C#: LHM — .NET-библиотека, и здесь она
 /// работает внутри процесса. Из Python пришлось бы держать запущенным само
 /// приложение LHM и парсить его веб-сервер.
 ///
 /// Без прав администратора датчики температуры молча отдают пустоту (п.6
 /// плана). Поэтому <see cref="SensorsAvailable"/> проверяется явно и
 /// сообщается наружу, а не выясняется по пустому Режиму 5.
+///
+/// Экземпляр на процесс должен быть один. Драйвер, через который LHM читает
+/// процессор, у библиотеки общий, и закрытие любого экземпляра закрывает его
+/// для всех: разведка со своим экземпляром отключала бы температуры сбору.
+/// Поэтому разведка берёт экземпляр сбора, а все обращения к нему идут под
+/// замком — сбор читает датчики из своего потока, разведка из своего.
 /// </remarks>
 public sealed class HardwareMonitor : IDisposable
 {
@@ -398,6 +405,8 @@ public sealed class HardwareMonitor : IDisposable
 
     private readonly Computer _computer;
     private readonly UpdateVisitor _visitor = new();
+    private readonly object _gate = new();
+    private bool _closed;
 
     public HardwareMonitor()
     {
@@ -411,22 +420,42 @@ public sealed class HardwareMonitor : IDisposable
 
     public bool SensorsAvailable { get; private set; } = true;
 
-    /// <summary>Все найденные датчики — чтобы не угадывать их имена.</summary>
-    public IEnumerable<string> Describe()
+    /// <summary>
+    /// Все найденные датчики — чтобы не угадывать их имена, — и свежее
+    /// показание. null — монитор уже закрыт.
+    /// </summary>
+    public (IReadOnlyList<string> Lines, bool Temps, double? GpuLoad)? Probe()
     {
-        _computer.Accept(_visitor);
-        foreach (var hardware in _computer.Hardware)
+        lock (_gate)
         {
-            yield return $"{hardware.HardwareType}  {hardware.Name}";
-            foreach (var sensor in hardware.Sensors)
+            if (_closed) return null;
+            // Чтение заодно обновляет значения датчиков и честно выставляет
+            // SensorsAvailable: без него разведка сообщала бы «температуры
+            // есть» на любой машине — так и было у прежнего агента.
+            var (_, gpuLoad, _, _) = ReadLocked();
+            var lines = new List<string>();
+            foreach (var hardware in _computer.Hardware)
             {
-                var value = sensor.Value is { } v ? v.ToString("0.##") : "—";
-                yield return $"    {sensor.SensorType,-12} {sensor.Name,-28} {value}";
+                lines.Add($"{hardware.HardwareType}  {hardware.Name}");
+                foreach (var sensor in hardware.Sensors)
+                {
+                    var value = sensor.Value is { } v ? v.ToString("0.##") : "—";
+                    lines.Add($"    {sensor.SensorType,-12} {sensor.Name,-28} {value}");
+                }
             }
+            return (lines, SensorsAvailable, gpuLoad);
         }
     }
 
     public (double? GpuTemp, double? GpuLoad, double? CpuTemp, double? CpuLoad) Read()
+    {
+        lock (_gate)
+        {
+            return _closed ? (null, null, null, null) : ReadLocked();
+        }
+    }
+
+    private (double? GpuTemp, double? GpuLoad, double? CpuTemp, double? CpuLoad) ReadLocked()
     {
         double? gpuTemp = null, gpuLoad = null, cpuTemp = null, cpuLoad = null;
         var gpuIsDiscrete = false;
@@ -488,5 +517,13 @@ public sealed class HardwareMonitor : IDisposable
         return (gpuTemp, gpuLoad, cpuTemp, cpuLoad);
     }
 
-    public void Dispose() => _computer.Close();
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_closed) return;
+            _closed = true;
+            _computer.Close();
+        }
+    }
 }

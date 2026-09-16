@@ -52,8 +52,8 @@
                                  Content="{l:T nav_screens}" Checked="Nav_Checked" Tag="1"/>
                     <RadioButton x:Name="NavStats" Style="{StaticResource NavButton}"
                                  Content="{l:T nav_stats}" Checked="Nav_Checked" Tag="2"/>
-                    <RadioButton x:Name="NavAgent" Style="{StaticResource NavButton}"
-                                 Content="{l:T nav_agent}" Checked="Nav_Checked" Tag="3"/>
+                    <RadioButton x:Name="NavComputer" Style="{StaticResource NavButton}"
+                                 Content="{l:T nav_computer}" Checked="Nav_Checked" Tag="3"/>
                     <RadioButton x:Name="NavSettings" Style="{StaticResource NavButton}"
                                  Content="{l:T nav_settings}" Checked="Nav_Checked" Tag="4"/>
                 </StackPanel>
@@ -353,99 +353,90 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- ================================================= агент -->
-            <!-- Агент — отдельный процесс без окна. Всё, что раньше печаталось
-                 в его консоль, показывается здесь, и отсюда же им управляют. -->
-            <ScrollViewer x:Name="PageAgent" Visibility="Collapsed"
+            <!-- ============================================== компьютер -->
+            <!-- Сбор данных с этого компьютера. Раньше им занималась отдельная
+                 программа — агент; теперь он часть приложения, и всё, что агент
+                 печатал в свою консоль, показывается здесь. -->
+            <ScrollViewer x:Name="PageComputer" Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <TextBlock Text="{l:T nav_agent}" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="{l:T nav_computer}" Style="{StaticResource PageTitle}"/>
                     <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,18"
-                               Text="{l:T agent_hint}"/>
+                               Text="{l:T computer_hint}"/>
+
+                    <Border x:Name="OldAgentCard" Visibility="Collapsed"
+                            Background="#FF241A1A" BorderBrush="{StaticResource Alert}"
+                            BorderThickness="1" CornerRadius="8" Padding="14,12"
+                            Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="{l:T computer_old_agent}" TextWrapping="Wrap"
+                                       FontSize="12" Foreground="{StaticResource Fg}"/>
+                            <Button x:Name="OldAgentFix" Content="{l:T computer_old_agent_fix}"
+                                    Style="{StaticResource Flat}" HorizontalAlignment="Left"
+                                    Margin="0,10,0,0" Click="Grant_Click"/>
+                        </StackPanel>
+                    </Border>
 
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <TextBlock Text="{l:T agent_state_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T computer_state_title}" Style="{StaticResource CardTitle}"/>
                             <StackPanel Orientation="Horizontal">
-                                <Ellipse x:Name="AgentDot" Width="10" Height="10"
+                                <Ellipse x:Name="ComputerDot" Width="10" Height="10"
                                          Fill="{StaticResource Dim}" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="AgentStatus" Text="—" Margin="10,0,0,0"
+                                <TextBlock x:Name="ComputerStatus" Text="—" Margin="10,0,0,0"
                                            Style="{StaticResource Metric}" FontSize="22"/>
                             </StackPanel>
-                            <TextBlock x:Name="AgentDetail" Style="{StaticResource Caption}"
-                                       Margin="20,4,0,0" TextWrapping="Wrap"/>
-
-                            <UniformGrid x:Name="AgentFacts" Columns="3" Rows="2" Margin="0,16,0,0"/>
-
-                            <Border x:Name="AgentTempsHint" Visibility="Collapsed"
-                                    Background="#FF2A2416" BorderBrush="{StaticResource Warn}"
-                                    BorderThickness="1" CornerRadius="8" Padding="12,9"
-                                    Margin="0,4,0,0">
-                                <TextBlock Text="{l:T agent_temps_hint}" TextWrapping="Wrap"
-                                           FontSize="12" Foreground="{StaticResource Fg}"/>
-                            </Border>
-                            <TextBlock x:Name="AgentError" Style="{StaticResource Caption}"
+                            <TextBlock x:Name="ComputerError" Style="{StaticResource Caption}"
                                        Foreground="{StaticResource Alert}" TextWrapping="Wrap"
-                                       Margin="0,8,0,0" Visibility="Collapsed"/>
+                                       Margin="20,4,0,0" Visibility="Collapsed"/>
 
-                            <WrapPanel Margin="0,14,0,0">
-                                <Button x:Name="AgentStart" Content="{l:T agent_start}"
-                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
-                                        Click="AgentStart_Click"/>
-                                <Button x:Name="AgentRestart" Content="{l:T agent_restart}"
-                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
-                                        Click="AgentRestart_Click"/>
-                                <Button x:Name="AgentStop" Content="{l:T agent_stop}"
-                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
-                                        Click="AgentStop_Click"/>
-                                <Button x:Name="AgentAdmin" Content="{l:T agent_start_admin}"
-                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
-                                        Click="AgentAdmin_Click"/>
-                            </WrapPanel>
-                            <TextBlock x:Name="AgentResult" Style="{StaticResource Caption}"
-                                       TextWrapping="Wrap"/>
+                            <UniformGrid x:Name="ComputerFacts" Columns="3" Rows="2" Margin="0,16,0,0"/>
 
-                            <CheckBox x:Name="AgentKeep" Content="{l:T agent_keep}" FontSize="13"
-                                      Margin="0,14,0,0" Click="AgentKeep_Click"/>
+                            <Border x:Name="TempsHint" Visibility="Collapsed"
+                                    Background="#FF2A2416" BorderBrush="{StaticResource Warn}"
+                                    BorderThickness="1" CornerRadius="8" Padding="12,10"
+                                    Margin="0,4,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{l:T computer_temps_hint}" TextWrapping="Wrap"
+                                               FontSize="12" Foreground="{StaticResource Fg}"/>
+                                    <Button x:Name="GrantRights" Content="{l:T computer_grant}"
+                                            Style="{StaticResource Flat}" HorizontalAlignment="Left"
+                                            Margin="0,10,0,0" Click="Grant_Click"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="GrantState" Style="{StaticResource Caption}"
+                                       TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
+
+                            <CheckBox x:Name="CollectBox" Content="{l:T computer_enabled}" FontSize="13"
+                                      Margin="0,16,0,0" Click="Collect_Click"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
-                                       TextWrapping="Wrap" Text="{l:T agent_keep_note}"/>
+                                       TextWrapping="Wrap" Text="{l:T computer_enabled_note}"/>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="{l:T agent_autostart_title}" Style="{StaticResource CardTitle}"/>
-                            <TextBlock x:Name="AgentAutostart" Style="{StaticResource Body}"
-                                       TextWrapping="Wrap"/>
-                            <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
-                                       TextWrapping="Wrap" Text="{l:T agent_autostart_note}"/>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
-                        <StackPanel>
-                            <TextBlock Text="{l:T agent_log_title}" Style="{StaticResource CardTitle}"/>
-                            <TextBox x:Name="AgentLog" Style="{StaticResource Console}" Height="190"/>
-                            <Button Content="{l:T agent_log_open}" Style="{StaticResource Flat}"
+                            <TextBlock Text="{l:T computer_log_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBox x:Name="ComputerLogBox" Style="{StaticResource Console}" Height="190"/>
+                            <Button Content="{l:T computer_log_open}" Style="{StaticResource Flat}"
                                     HorizontalAlignment="Left" Margin="0,10,0,0"
-                                    Click="AgentLogOpen_Click"/>
+                                    Click="ComputerLogOpen_Click"/>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="{l:T agent_probe_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T computer_probe_title}" Style="{StaticResource CardTitle}"/>
                             <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
-                                       Text="{l:T agent_probe_note}"/>
+                                       Text="{l:T computer_probe_note}"/>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                <Button x:Name="ProbeWindows" Content="{l:T agent_probe_windows}"
-                                        Style="{StaticResource Flat}" Tag="--windows"
-                                        Click="Probe_Click"/>
-                                <Button x:Name="ProbeSensors" Content="{l:T agent_probe_sensors}"
-                                        Style="{StaticResource Flat}" Tag="--list-sensors"
-                                        Margin="10,0,0,0" Click="Probe_Click"/>
+                                <Button x:Name="ProbeWindows" Content="{l:T computer_probe_windows}"
+                                        Style="{StaticResource Flat}" Click="ProbeWindows_Click"/>
+                                <Button x:Name="ProbeSensors" Content="{l:T computer_probe_sensors}"
+                                        Style="{StaticResource Flat}" Margin="10,0,0,0"
+                                        Click="ProbeSensors_Click"/>
                             </StackPanel>
-                            <TextBox x:Name="AgentProbe" Style="{StaticResource Console}"
+                            <TextBox x:Name="ProbeOutput" Style="{StaticResource Console}"
                                      Height="190" Margin="0,12,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Border>
@@ -463,16 +454,17 @@
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="{l:T host_title}" Style="{StaticResource CardTitle}"/>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBox x:Name="HostBox" Width="260" FontSize="13"/>
-                                <TextBox x:Name="PortBox" Width="80" Margin="8,0,0,0" FontSize="13"/>
-                                <Button Content="{l:T host_test}" Style="{StaticResource Flat}"
-                                        Margin="10,0,0,0" Click="TestHost_Click"/>
-                            </StackPanel>
-                            <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
+                            <WrapPanel>
+                                <TextBox x:Name="HostBox" Width="220" FontSize="13" Margin="0,0,8,6"/>
+                                <TextBox x:Name="PortBox" Width="70" FontSize="13" Margin="0,0,10,6"/>
+                                <Button Content="{l:T host_test}"
+                                        Style="{StaticResource Flat}" Margin="0,0,0,6"
+                                        Click="TestHost_Click"/>
+                            </WrapPanel>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0"
                                        TextWrapping="Wrap" Text="{l:T host_note}"/>
                             <TextBlock x:Name="TestResult" Style="{StaticResource Caption}"
-                                       Margin="0,8,0,0"/>
+                                       Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
                         </StackPanel>
                     </Border>
 
@@ -600,6 +592,8 @@
                             <TextBlock Text="{l:T startup_title}" Style="{StaticResource CardTitle}"/>
                             <CheckBox x:Name="AutostartBox" FontSize="13"
                                       Content="{l:T startup_autostart}" Click="Autostart_Click"/>
+                            <TextBlock x:Name="AutostartState" Style="{StaticResource Caption}"
+                                       Margin="26,4,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
                             <CheckBox x:Name="MinimizedBox" FontSize="13" Margin="0,10,0,0"
                                       Content="{l:T startup_minimized}" Click="Minimized_Click"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"

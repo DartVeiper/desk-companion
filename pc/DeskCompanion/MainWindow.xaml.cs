@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using DeskCompanion.Collection;
 using DeskCompanion.Services;
 
 namespace DeskCompanion;
@@ -59,14 +60,15 @@ public partial class MainWindow : Window
     private readonly Board _board = new();
     private readonly Backup _backup;
     private readonly Settings _settings;
+    private readonly Collector? _collector;
     private readonly System.Collections.ObjectModel.ObservableCollection<ScreenRow> _screens = new();
     private readonly System.Windows.Threading.DispatcherTimer _timer = new();
     private Point _dragStart;
 
     /// <summary>
-    /// Только смотреть: не поднимать агента и не снимать копий базы. Нужно
-    /// режиму снимка — окно живёт в нём три секунды, и за это время оно не
-    /// должно ничего менять на компьютере.
+    /// Только смотреть: не искать блок, не снимать копий базы и не трогать
+    /// автозапуск. Нужно режиму снимка — окно живёт в нём три секунды, и за
+    /// это время оно не должно ничего менять на компьютере.
     /// </summary>
     private readonly bool _passive;
 
@@ -76,10 +78,13 @@ public partial class MainWindow : Window
     /// <summary>Куда написать состояние связи — подсказка значка в трее.</summary>
     public Action<string>? LinkStateChanged;
 
-    public MainWindow(Settings settings, bool passive = false)
+    /// <param name="collector">Сбор данных с компьютера; null — окно без
+    /// него, как в режиме снимка.</param>
+    public MainWindow(Settings settings, Collector? collector, bool passive = false)
     {
         InitializeComponent();
         _settings = settings;
+        _collector = collector;
         _passive = passive;
         _backup = new Backup(_board);
         _board.Host = settings.Host;
@@ -87,9 +92,8 @@ public partial class MainWindow : Window
 
         HostBox.Text = settings.Host;
         PortBox.Text = settings.Port.ToString();
-        AutostartBox.IsChecked = Settings.IsAutostartOn();
         MinimizedBox.IsChecked = settings.StartMinimized;
-        AgentKeep.IsChecked = settings.AgentManaged;
+        CollectBox.IsChecked = settings.CollectorEnabled;
         ScreenList.ItemsSource = _screens;
         FillLanguageBox();
 
@@ -99,11 +103,7 @@ public partial class MainWindow : Window
         // обещано было обратное — что оно ждёт плату само и подхватит её,
         // как только та появится в сети.
         _timer.Interval = TimeSpan.FromSeconds(HiddenSeconds);
-        _timer.Tick += (_, _) =>
-        {
-            Refresh();
-            KeepAgentAlive();
-        };
+        _timer.Tick += (_, _) => Refresh();
         _timer.Start();
         Refresh();
 
@@ -125,13 +125,19 @@ public partial class MainWindow : Window
         _calibrationPoll.Tick += async (_, _) => await PollCalibrationAsync();
 
         Lang.Changed += ApplyLanguage;
-        Closed += (_, _) => Lang.Changed -= ApplyLanguage;
+        if (_collector is not null) _collector.Changed += OnCollectorChanged;
+        ComputerLog.Written += OnLogWritten;
+        Closed += (_, _) =>
+        {
+            Lang.Changed -= ApplyLanguage;
+            if (_collector is not null) _collector.Changed -= OnCollectorChanged;
+            ComputerLog.Written -= OnLogWritten;
+        };
 
         Loaded += async (_, _) =>
         {
-            _agentHasTask = Agent.HasTask;
-            RefreshAgent();
-            KeepAgentAlive();
+            RefreshAutostart();
+            RefreshComputer();
             await RefreshScreensAsync();
             await RefreshTouchAsync();
             await RefreshLanguageAsync();
@@ -140,13 +146,27 @@ public partial class MainWindow : Window
         };
     }
 
+    private RadioButton[] NavButtons =>
+        new[] { NavOverview, NavScreens, NavStats, NavComputer, NavSettings };
+
+    private FrameworkElement[] Pages =>
+        new FrameworkElement[] { PageOverview, PageScreens, PageStats, PageComputer, PageSettings };
+
     /// <summary>Переключить страницу снаружи — нужно режиму снимка.</summary>
-    public void SelectPage(string tag)
+    public void SelectPage(string tag) => SelectPage(int.TryParse(tag, out var value) ? value : 0);
+
+    /// <summary>
+    /// Переключить страницу снаружи — нужно режиму снимка и второму запуску,
+    /// который просит окно показаться на определённой странице.
+    /// </summary>
+    public void SelectPage(int index)
     {
-        var buttons = new[] { NavOverview, NavScreens, NavStats, NavAgent, NavSettings };
-        var index = int.TryParse(tag, out var value) ? value : 0;
+        var buttons = NavButtons;
         buttons[Math.Clamp(index, 0, buttons.Length - 1)].IsChecked = true;
     }
+
+    /// <summary>Какая страница открыта.</summary>
+    public int CurrentPage => Array.FindIndex(NavButtons, b => b.IsChecked == true);
 
     /// <summary>
     /// Перерисовать всё, что собирает код, на новом языке.
@@ -162,7 +182,8 @@ public partial class MainWindow : Window
         Refresh();
         if (_today is not null) ApplyToday(_today);
         ShowBackupState();
-        RefreshAgent();
+        RefreshComputer();
+        RefreshAutostart();
         if (_touchKnown) TouchState.Text = Sensitivity(TouchSlider.Value);
         if (_calibration is not null) ShowCalibration(_calibration);
 
@@ -195,18 +216,17 @@ public partial class MainWindow : Window
     {
         if (PageOverview is null) return;  // ещё не собрано окно
         var tag = (sender as FrameworkElement)?.Tag as string ?? "0";
-        var pages = new FrameworkElement[] { PageOverview, PageScreens, PageStats, PageAgent, PageSettings };
+        var pages = Pages;
         var index = int.TryParse(tag, out var value) ? Math.Clamp(value, 0, pages.Length - 1) : 0;
         for (var i = 0; i < pages.Length; i++)
             pages[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
 
-        if (pages[index] == PageAgent)
-        {
-            // Задачу планировщика спрашиваем не каждую секунду, а когда на
-            // неё смотрят: это запуск отдельной программы.
-            _agentHasTask = Agent.HasTask;
-            RefreshAgent();
-        }
+        // Скрытые страницы на опросе не перерисовываются — догоняем их при
+        // открытии, чтобы не показать на мгновение прошлое состояние.
+        if (pages[index] == PageComputer) RefreshComputer();
+        // Задачу планировщика спрашиваем не каждую секунду, а когда на неё
+        // смотрят: это обращение к службе, а не к памяти.
+        if (pages[index] == PageSettings) RefreshAutostart();
         Appear(pages[index]);
     }
 
@@ -247,7 +267,6 @@ public partial class MainWindow : Window
     {
         var live = await _board.LiveAsync();
         ApplyLive(live);
-        if (PageAgent.Visibility == Visibility.Visible) RefreshAgent();
 
         // Сводка за день меняется минутами, а не секундами: дёргать её
         // каждую секунду — зря будить и сеть, и базу на блоке.
@@ -625,209 +644,241 @@ public partial class MainWindow : Window
         return (source as ListBoxItem)?.DataContext as ScreenRow;
     }
 
-    // ------------------------------------------------------------ агент
+    // -------------------------------------------------------- компьютер
 
-    //: Есть ли задача планировщика. Спрашивать её — значит запускать
-    //: schtasks, поэтому ответ помним и обновляем, когда страница открыта
-    //: или агента запускали.
-    private bool _agentHasTask;
-    private bool _agentBusy;
-    private DateTime _agentChecked = DateTime.MinValue;
-    private string _agentLog = "";
+    private static readonly string OwnProcess =
+        System.IO.Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "DeskCompanion");
 
-    /// <summary>Как часто проверять, что агент жив, если за ним следим.</summary>
-    private static readonly TimeSpan KeepAliveEvery = TimeSpan.FromSeconds(30);
+    private string _logShown = "";
+    private bool _granting;
+
+    //: Последнее окно, кроме нашего. Пока человек смотрит на эту страницу,
+    //: впереди всегда само приложение, и показывать это бессмысленно.
+    private CollectorState? _lastWindow;
 
     /// <summary>
-    /// Поднять агента, если он не работает, а слежение включено.
-    ///
-    /// Планировщик поднимает агента при входе в систему, но не после того,
-    /// как тот упал посреди дня, — а упавший агент значит пустые данные с
-    /// компьютера до следующей перезагрузки. Раз в полминуты — чаще незачем:
-    /// минутный счётчик нажатий за это время почти ничего не теряет.
+    /// Прежний агент работает и остановить его не вышло. Пока так, сбор не
+    /// запускается: у агента и сбора один клиент на брокере, и они выбивали
+    /// бы друг друга каждые несколько секунд.
     /// </summary>
-    private async void KeepAgentAlive()
-    {
-        if (_passive || _agentBusy || !_settings.AgentManaged) return;
-        if (DateTime.Now - _agentChecked < KeepAliveEvery) return;
-        _agentChecked = DateTime.Now;
-        if (Agent.IsRunning) return;
+    public bool OldAgentInTheWay { get; set; }
 
-        _agentBusy = true;
-        try
+    /// <summary>
+    /// Уступить место экземпляру с правами, который поднимает задача
+    /// автозапуска. Параметр — какую страницу открыть в новом окне; true —
+    /// уступили, и это приложение закрывается.
+    /// </summary>
+    public Func<int, Task<bool>>? RestartWithRights;
+
+    private void OnCollectorChanged()
+    {
+        // Снимок — здесь, в потоке сбора: к тому времени, как очередь окна
+        // до него дойдёт, окно впереди может смениться ещё раз.
+        var state = _collector?.State;
+        if (state is null) return;
+        Dispatcher.InvokeAsync(() =>
         {
-            await Agent.StartAsync();
-        }
-        finally
-        {
-            _agentBusy = false;
-        }
-        RefreshAgent();
+            if (!string.IsNullOrEmpty(state.ActiveApp)
+                && !string.Equals(state.ActiveApp, OwnProcess, StringComparison.OrdinalIgnoreCase))
+                _lastWindow = state;
+            if (PageComputer.IsVisible) RefreshComputer();
+        });
     }
 
-    private void RefreshAgent()
+    private void OnLogWritten() => Dispatcher.InvokeAsync(() =>
     {
-        var running = Agent.IsRunning;
-        var report = Agent.ReadReport();
-        var age = report is null ? TimeSpan.MaxValue : DateTime.Now - report.Updated;
-        var fresh = running && report is not null && age < Agent.StaleAfter;
+        if (PageComputer.IsVisible) ShowComputerLog();
+    });
 
-        string status, dot, detail = "";
-        if (!running)
-        {
-            status = Lang.T("agent_stopped");
-            dot = "Dim";
-        }
-        else if (!fresh)
-        {
-            status = Lang.T("agent_hung");
-            dot = "Alert";
-            detail = report is null ? "" : Lang.T("agent_hung_detail", Ago(age));
-        }
-        else if (!report!.Connected)
-        {
-            status = Lang.T("agent_running_offline");
-            dot = "Warn";
-        }
-        else
-        {
-            status = Lang.T("agent_running");
-            dot = "Ok";
-        }
-        AgentStatus.Text = status;
-        AgentStatus.Foreground = Brush(dot == "Dim" ? "Fg" : dot);
-        AgentDot.Fill = Brush(dot);
-        AgentDetail.Text = detail;
-        AgentDetail.Visibility = detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    private void RefreshComputer()
+    {
+        var state = _collector?.State ?? new CollectorState();
 
-        AgentFacts.Children.Clear();
-        if (fresh)
+        var (status, dot) =
+            OldAgentInTheWay ? ("computer_blocked", "Alert")
+            : _collector is null || !_settings.CollectorEnabled ? ("computer_off", "Dim")
+            : !state.Running ? ("computer_starting", "Dim")
+            : !state.Connected ? ("computer_offline", "Warn")
+            : ("computer_running", "Ok");
+        ComputerStatus.Text = Lang.T(status);
+        ComputerStatus.Foreground = Brush(dot == "Dim" ? "Fg" : dot);
+        ComputerDot.Fill = Brush(dot);
+
+        var error = state.Running ? state.LastError : null;
+        ShowNote(ComputerError, string.IsNullOrEmpty(error) ? null : Lang.T("computer_last_error", error), "Alert");
+
+        ComputerFacts.Children.Clear();
+        if (state.Running)
         {
-            AddFact(AgentFacts, Lang.T("agent_fact_board"), $"{report!.Host}:{report.Port}");
-            AddFact(AgentFacts, Lang.T("agent_fact_link"),
-                    Lang.T(report.Connected ? "fact_yes" : "fact_no"),
-                    report.Connected ? "Ok" : "Warn");
-            AddFact(AgentFacts, Lang.T("agent_fact_temps"),
-                    Lang.T(report.Sensors ? "agent_temps_ok" : "agent_temps_no"),
-                    report.Sensors ? "Fg" : "Warn");
-            AddFact(AgentFacts, Lang.T("agent_fact_input"),
-                    Lang.T(report.InputHooks ? "agent_input_ok" : "agent_input_no"),
-                    report.InputHooks ? "Fg" : "Warn");
-            AddFact(AgentFacts, Lang.T("agent_fact_rights"),
-                    Lang.T(report.Elevated ? "agent_rights_admin" : "agent_rights_user"));
-            AddFact(AgentFacts, Lang.T("agent_fact_started"),
-                    report.Started.ToString("HH:mm", Lang.Culture));
+            AddFact(ComputerFacts, Lang.T("computer_fact_board"), $"{state.Host}:{state.Port}");
+            AddFact(ComputerFacts, Lang.T("computer_fact_link"),
+                    Lang.T(state.Connected ? "fact_yes" : "fact_no"),
+                    state.Connected ? "Ok" : "Warn");
+            AddFact(ComputerFacts, Lang.T("computer_fact_temps"),
+                    Lang.T(state.Sensors ? "computer_temps_ok" : "computer_temps_no"),
+                    state.Sensors ? "Fg" : "Warn");
+            AddFact(ComputerFacts, Lang.T("computer_fact_input"),
+                    Lang.T(state.InputHooks ? "computer_input_ok" : "computer_input_no"),
+                    state.InputHooks ? "Fg" : "Warn");
+            AddFact(ComputerFacts, Lang.T("computer_fact_rights"),
+                    Lang.T(state.Elevated ? "computer_rights_admin" : "computer_rights_user"));
+            AddFact(ComputerFacts, Lang.T("computer_fact_window"), WindowLabel(_lastWindow));
         }
-        AgentFacts.Visibility = fresh ? Visibility.Visible : Visibility.Collapsed;
-        AgentTempsHint.Visibility = fresh && !report!.Sensors
+        ComputerFacts.Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed;
+
+        // Про права — только когда их действительно не хватает. С правами и
+        // без температур кнопка не поможет: там виноват не запуск.
+        TempsHint.Visibility = state.Running && !state.Sensors && !state.Elevated
             ? Visibility.Visible
             : Visibility.Collapsed;
+        OldAgentCard.Visibility = OldAgentInTheWay ? Visibility.Visible : Visibility.Collapsed;
+        GrantRights.IsEnabled = OldAgentFix.IsEnabled = !_granting && !_passive;
 
-        var error = fresh ? report!.LastError : null;
-        AgentError.Text = string.IsNullOrEmpty(error) ? "" : Lang.T("agent_last_error", error);
-        AgentError.Visibility = string.IsNullOrEmpty(error) ? Visibility.Collapsed : Visibility.Visible;
+        CollectBox.IsChecked = _settings.CollectorEnabled;
+        CollectBox.IsEnabled = _collector is not null && !OldAgentInTheWay;
 
-        AgentStart.IsEnabled = !running && !_agentBusy;
-        AgentRestart.IsEnabled = running && !_agentBusy;
-        AgentStop.IsEnabled = running && !_agentBusy;
-        // Кнопка с правами нужна, только когда их не хватает: без задачи
-        // планировщика или когда агент уже работает без них.
-        AgentAdmin.Visibility = !_agentHasTask || (fresh && !report!.Elevated)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        AgentAdmin.IsEnabled = !_agentBusy;
+        ShowComputerLog();
+    }
 
-        AgentAutostart.Text = Lang.T(_agentHasTask ? "agent_autostart_on" : "agent_autostart_off");
-        AgentAutostart.Foreground = Brush(_agentHasTask ? "Ok" : "Warn");
+    private static string WindowLabel(CollectorState? state)
+    {
+        if (state is null || string.IsNullOrEmpty(state.ActiveApp)) return "—";
+        var key = $"category_{state.Category}";
+        var category = Strings.Ru.ContainsKey(key) ? Lang.T(key) : state.Category;
+        return $"{state.ActiveApp} · {category}";
+    }
 
-        var lines = Agent.Tail(60);
-        var text = lines.Count == 0 ? Lang.T("agent_log_empty") : string.Join(Environment.NewLine, lines);
+    private void ShowComputerLog()
+    {
+        var lines = ComputerLog.Lines();
+        var text = lines.Count == 0
+            ? Lang.T("computer_log_empty")
+            : string.Join(Environment.NewLine, lines.TakeLast(80));
         // Перерисовываем, только если журнал изменился: иначе каждую
         // секунду слетало бы выделение, а прокрутка прыгала бы в конец,
         // пока человек читает середину.
-        if (text != _agentLog)
-        {
-            _agentLog = text;
-            AgentLog.Text = text;
-            AgentLog.ScrollToEnd();
-        }
+        if (text == _logShown) return;
+        _logShown = text;
+        ComputerLogBox.Text = text;
+        ComputerLogBox.ScrollToEnd();
     }
 
-    private async Task RunAgentAction(Func<Task<string?>> action, string progressKey)
+    private async void Collect_Click(object sender, RoutedEventArgs e)
     {
-        _agentBusy = true;
-        AgentResult.Text = Lang.T(progressKey);
-        AgentResult.Foreground = Brush("Dim");
-        RefreshAgent();
-        string? error;
+        if (_passive || _collector is null) return;
+        var on = CollectBox.IsChecked == true;
+        _settings.CollectorEnabled = on;
+        _settings.Save();
+        if (on && !OldAgentInTheWay) _collector.Start();
+        else if (!on) await _collector.StopAsync();
+        RefreshComputer();
+    }
+
+    private async void Grant_Click(object sender, RoutedEventArgs e)
+    {
+        if (_passive || _granting) return;
+        _granting = true;
+        RefreshComputer();
         try
         {
-            error = await action();
+            await EnableRightsAsync(GrantState);
         }
         finally
         {
-            _agentBusy = false;
+            _granting = false;
+            RefreshComputer();
         }
-        _agentHasTask = Agent.HasTask;
-        AgentResult.Text = error ?? Lang.T("agent_done");
-        AgentResult.Foreground = Brush(error is null ? "Ok" : "Alert");
-        RefreshAgent();
     }
 
-    private async void AgentStart_Click(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Завести автозапуск с правами и, если приложение само работает без
+    /// них, уступить место экземпляру, которого поднимет задача.
+    /// </summary>
+    /// <param name="note">Куда писать, как идут дела.</param>
+    private async Task EnableRightsAsync(TextBlock note)
     {
-        SetAgentManaged(true);
-        await RunAgentAction(Agent.StartAsync, "agent_starting");
+        ShowNote(note, Lang.T("autostart_waiting"), "Dim");
+        var error = await Autostart.SetAsync(true);
+        // Помощник с правами писал в журнал из своего процесса.
+        ComputerLog.Reload();
+        RefreshAutostart();
+        if (error is not null)
+        {
+            ShowNote(note, error, "Alert");
+            return;
+        }
+
+        if (Elevation.IsElevated)
+        {
+            // Права уже есть — уступать некому. Задача заведена, старый
+            // агент убран вместе с ней; осталось запустить сбор, если он
+            // ждал, пока агент уйдёт.
+            ShowNote(note, null, "Dim");
+            if (!OldAgentInTheWay) return;
+            OldAgentInTheWay = Autostart.CleanUpOldSetup(removeRunKey: true);
+            if (!OldAgentInTheWay && _settings.CollectorEnabled) _collector?.Start();
+            RefreshComputer();
+            return;
+        }
+
+        ShowNote(note, Lang.T("computer_restarting"), "Dim");
+        if (RestartWithRights is not null && await RestartWithRights(CurrentPage)) return;
+        ShowNote(note, Lang.T("computer_restart_failed"), "Warn");
     }
 
-    private async void AgentRestart_Click(object sender, RoutedEventArgs e)
-        => await RunAgentAction(Agent.RestartAsync, "agent_starting");
-
-    private async void AgentStop_Click(object sender, RoutedEventArgs e)
+    private void ComputerLogOpen_Click(object sender, RoutedEventArgs e)
     {
-        // Иначе слежение подняло бы остановленного агента через полминуты,
-        // и кнопка выглядела бы сломанной.
-        SetAgentManaged(false);
-        await RunAgentAction(Agent.StopAsync, "agent_stopping");
-    }
-
-    private async void AgentAdmin_Click(object sender, RoutedEventArgs e)
-    {
-        SetAgentManaged(true);
-        await RunAgentAction(Agent.StartElevatedAsync, "agent_starting");
-    }
-
-    private void AgentKeep_Click(object sender, RoutedEventArgs e)
-        => SetAgentManaged(AgentKeep.IsChecked == true);
-
-    private void SetAgentManaged(bool on)
-    {
-        _settings.AgentManaged = on;
-        _settings.Save();
-        AgentKeep.IsChecked = on;
-        // Включили слежение — проверить сразу, а не через полминуты.
-        if (on) _agentChecked = DateTime.MinValue;
-    }
-
-    private void AgentLogOpen_Click(object sender, RoutedEventArgs e)
-    {
-        if (!System.IO.File.Exists(Agent.LogPath)) return;
+        if (!System.IO.File.Exists(ComputerLog.FilePath)) return;
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
-            FileName = Agent.LogPath,
+            FileName = ComputerLog.FilePath,
             UseShellExecute = true,
         });
     }
 
-    private async void Probe_Click(object sender, RoutedEventArgs e)
+    private async void ProbeWindows_Click(object sender, RoutedEventArgs e)
+        => await RunProbeAsync(() =>
+        {
+            var lines = ActiveWindow.Describe().ToList();
+            lines.Add("");
+            lines.Add(Lang.T("probe_overrides_from", Overrides.Path));
+            return lines;
+        });
+
+    private async void ProbeSensors_Click(object sender, RoutedEventArgs e)
+        => await RunProbeAsync(() =>
+        {
+            var (found, temps, _) = ProbeHardware();
+            var lines = found.ToList();
+            lines.Add("");
+            lines.Add(Lang.T(temps ? "probe_temps_ok"
+                             : Elevation.IsElevated ? "probe_temps_blocked"
+                             : "probe_temps_none"));
+            return lines;
+        });
+
+    private (IReadOnlyList<string> Lines, bool Temps, double? GpuLoad) ProbeHardware()
     {
-        if ((sender as FrameworkElement)?.Tag as string is not { } key) return;
+        if (_collector is not null) return _collector.ProbeHardware();
+        using var own = new HardwareMonitor();
+        return own.Probe() ?? (Array.Empty<string>(), false, null);
+    }
+
+    private async Task RunProbeAsync(Func<List<string>> probe)
+    {
         ProbeWindows.IsEnabled = ProbeSensors.IsEnabled = false;
-        AgentProbe.Visibility = Visibility.Visible;
-        AgentProbe.Text = Lang.T("agent_probe_running");
+        ProbeOutput.Visibility = Visibility.Visible;
+        ProbeOutput.Text = Lang.T("computer_probe_running");
         try
         {
-            AgentProbe.Text = await Agent.DiagnoseAsync(key);
+            // Обход процессов и датчиков — секунды работы, и окно на это
+            // время замирать не должно.
+            var lines = await Task.Run(probe);
+            ProbeOutput.Text = string.Join(Environment.NewLine, lines);
+        }
+        catch (Exception error)
+        {
+            ProbeOutput.Text = error.Message;
         }
         finally
         {
@@ -840,25 +891,21 @@ public partial class MainWindow : Window
     private async void TestHost_Click(object sender, RoutedEventArgs e)
     {
         var host = HostBox.Text.Trim();
+        if (host.Length == 0) return;
         var moved = !string.Equals(host, _settings.Host, StringComparison.OrdinalIgnoreCase);
         _settings.Host = _board.Host = host;
         _settings.Port = _board.Port = int.TryParse(PortBox.Text, out var port) ? port : 843;
         _settings.Save();
+        // Сбор берёт адрес из тех же настроек, но подключён по старому —
+        // пусть переподключится, иначе будет стучаться туда, где блока нет.
+        if (moved) _collector?.Reconnect();
 
-        TestResult.Text = Lang.T("host_testing");
-        TestResult.Foreground = Brush("Dim");
+        ShowNote(TestResult, Lang.T("host_testing"), "Dim");
         var live = await _board.LiveAsync();
-        TestResult.Text = live is null
-            ? Lang.T("host_bad", _board.LastError)
-            : Lang.T("host_good", live.Version);
-        TestResult.Foreground = Brush(live is null ? "Alert" : "Ok");
+        ShowNote(TestResult,
+                 live is null ? Lang.T("host_bad", _board.LastError) : Lang.T("host_good", live.Version),
+                 live is null ? "Alert" : "Ok");
         if (live is not null) await RefreshScreensAsync();
-
-        // Агент берёт адрес из тех же настроек, но читает его при запуске.
-        // Сменили адрес — перезапускаем, иначе он продолжит стучаться туда,
-        // где блока больше нет.
-        if (moved && Agent.IsRunning && !_passive)
-            await RunAgentAction(Agent.RestartAsync, "agent_starting");
     }
 
     private void ShowBackupState()
@@ -892,17 +939,34 @@ public partial class MainWindow : Window
         });
     }
 
-    private void Autostart_Click(object sender, RoutedEventArgs e)
+    private void RefreshAutostart()
     {
+        AutostartBox.IsChecked = Autostart.IsOn;
+        ShowNote(AutostartState, Autostart.IsStale ? Lang.T("startup_stale") : null, "Warn");
+    }
+
+    private async void Autostart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_passive) return;
         var want = AutostartBox.IsChecked == true;
-        if (!Settings.SetAutostart(want))
+        AutostartBox.IsEnabled = false;
+        try
         {
-            AutostartBox.IsChecked = Settings.IsAutostartOn();
-            TestResult.Text = Lang.T("startup_failed");
-            return;
+            if (want)
+            {
+                await EnableRightsAsync(AutostartState);
+                return;
+            }
+            ShowNote(AutostartState, Lang.T("autostart_waiting"), "Dim");
+            var error = await Autostart.SetAsync(false);
+            ComputerLog.Reload();
+            RefreshAutostart();
+            if (error is not null) ShowNote(AutostartState, error, "Alert");
         }
-        _settings.Autostart = want;
-        _settings.Save();
+        finally
+        {
+            AutostartBox.IsEnabled = true;
+        }
     }
 
     private void Minimized_Click(object sender, RoutedEventArgs e)
@@ -1130,7 +1194,7 @@ public partial class MainWindow : Window
     {
         CalibStart.IsEnabled = false;
         CalibState.Foreground = Brush("Dim");
-        CalibState.Text = Lang.T("agent_starting");
+        CalibState.Text = Lang.T("calib_starting");
         var state = await _board.RequestCalibrationAsync("start");
         if (state is null)
         {
@@ -1180,7 +1244,7 @@ public partial class MainWindow : Window
             "cancelled" => (string.IsNullOrEmpty(state.Detail)
                 ? Lang.T("calib_cancelled")
                 : $"{Lang.T("calib_cancelled")} · {state.Detail}", "Dim"),
-            _ => (Lang.T("agent_starting"), "Dim"),
+            _ => (Lang.T("calib_starting"), "Dim"),
         };
         CalibState.Foreground = Brush(brush);
     }
@@ -1195,6 +1259,14 @@ public partial class MainWindow : Window
     // ------------------------------------------------------------ мелочи
 
     private Brush Brush(string key) => (Brush)FindResource(key);
+
+    /// <summary>Строка-пояснение: пустая прячется, чтобы не держать отступ.</summary>
+    private void ShowNote(TextBlock block, string? text, string brush)
+    {
+        block.Text = text ?? "";
+        block.Foreground = Brush(brush);
+        block.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     private static string Percent(double? value)
         => value is null ? "—" : string.Format(Lang.Culture, "{0:0} %", value);

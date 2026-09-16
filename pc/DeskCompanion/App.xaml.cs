@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DeskCompanion.Collection;
 using DeskCompanion.Services;
 using Forms = System.Windows.Forms;
 
@@ -12,6 +13,16 @@ public partial class App : Application
     private Forms.NotifyIcon? _tray;
     private MainWindow? _window;
     private Settings _settings = new();
+    private SingleInstance? _instance;
+    private Collector? _collector;
+    private bool _quitting;
+
+    /// <summary>
+    /// Сколько ждать экземпляр с правами, поднятый задачей. Обычно он
+    /// появляется за секунду; первый запуск однофайлового exe распаковывает
+    /// себя и бывает втрое дольше.
+    /// </summary>
+    private static readonly TimeSpan HandOffWait = TimeSpan.FromSeconds(10);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -20,6 +31,15 @@ public partial class App : Application
         // Язык — до создания окна: иначе оно на мгновение нарисовалось бы
         // на русском и перескочило бы.
         Lang.Use(Argument(e.Args, "--lang") ?? _settings.Language);
+
+        // Помощник: завести или снять автозапуск с правами. Его запускает
+        // само приложение, когда прав у него нет, и ждёт код выхода — окна
+        // здесь не бывает.
+        if (Argument(e.Args, "--autostart") is { } mode)
+        {
+            Shutdown(Autostart.HandleHelper(mode));
+            return;
+        }
 
         // Режим снимка: собрать окно, отрисовать в файл и выйти, не
         // показывая ничего на экране. Нужен, чтобы проверять вёрстку, не
@@ -32,17 +52,118 @@ public partial class App : Application
             return;
         }
 
-        _window = new MainWindow(_settings);
+        var toTray = e.Args.Contains("--tray");
+
+        // Приложение уже работает — показывается оно, второе не нужно: два
+        // сбора слали бы блоку одно и то же вперемешку.
+        if (SingleInstance.IsRunning())
+        {
+            if (!toTray) SingleInstance.SignalShow(TimeSpan.FromSeconds(3));
+            Shutdown();
+            return;
+        }
+
+        // Запустили без прав, а автозапуск с правами заведён — поднимаемся
+        // через его задачу. Так температуры читаются и у приложения,
+        // открытого двойным щелчком, и без окна UAC. Задачу, смотрящую на
+        // другой exe, не трогаем: она подняла бы не эту версию.
+        if (!Elevation.IsElevated && Autostart.HasTask && !Autostart.IsStale
+            && HandOff(page: -1, show: !toTray))
+        {
+            Shutdown();
+            return;
+        }
+
+        _instance = SingleInstance.TryClaim();
+        if (_instance is null)
+        {
+            // Второй запуск успел раньше — уступаем ему.
+            if (!toTray) SingleInstance.SignalShow(TimeSpan.FromSeconds(3));
+            Shutdown();
+            return;
+        }
+
+        // До сбора: старый агент должен уйти раньше, чем сбор подключится
+        // к брокеру под тем же именем.
+        var oldAgent = Autostart.Migrate();
+        _collector = new Collector(() => _settings.Host);
+        if (_settings.CollectorEnabled && !oldAgent) _collector.Start();
+
+        _window = new MainWindow(_settings, _collector)
+        {
+            OldAgentInTheWay = oldAgent,
+            RestartWithRights = RestartWithRightsAsync,
+        };
+        _instance.Listen(OnShowRequest);
         SetUpTray();
 
-        var toTray = e.Args.Contains("--tray") && _settings.StartMinimized;
-        if (!toTray) _window.Show();
+        if (!(toTray && _settings.StartMinimized)) _window.Show();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _instance?.Dispose();
+        _instance = null;
+        base.OnExit(e);
     }
 
     private static string? Argument(string[] args, string name)
     {
         var index = Array.IndexOf(args, name);
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+
+    private void OnShowRequest(int page) => Dispatcher.InvokeAsync(() => ShowWindow(page));
+
+    /// <summary>
+    /// Поднять экземпляр с правами задачей автозапуска и дождаться его.
+    /// </summary>
+    /// <param name="page">Какую страницу ему открыть; -1 — любую.</param>
+    /// <param name="show">Попросить его показать окно.</param>
+    /// <returns>Он работает — этому экземпляру пора уходить.</returns>
+    private static bool HandOff(int page, bool show)
+    {
+        if (!Autostart.RunNow()) return false;
+        var until = DateTime.UtcNow + HandOffWait;
+        while (DateTime.UtcNow < until)
+        {
+            if (SingleInstance.IsRunning())
+            {
+                // Место он занимает раньше, чем начинает слушать просьбы, —
+                // поэтому просим, пока не услышит или не выйдет время.
+                while (show && DateTime.UtcNow < until)
+                {
+                    if (SingleInstance.SignalShow(TimeSpan.FromMilliseconds(500), page)) break;
+                }
+                return true;
+            }
+            Thread.Sleep(100);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Уступить место экземпляру с правами: освободить брокер и имя, поднять
+    /// задачу и выйти. Не вышло — вернуть всё как было.
+    /// </summary>
+    private async Task<bool> RestartWithRightsAsync(int page)
+    {
+        if (_collector is not null) await _collector.StopAsync();
+        // Освобождать место можно только из потока, который его занял, —
+        // а это поток окна, и await выше возвращает именно в него.
+        _instance?.Dispose();
+        _instance = null;
+
+        if (await Task.Run(() => HandOff(page, show: true)))
+        {
+            Quit();
+            return true;
+        }
+
+        _instance = SingleInstance.TryClaim();
+        _instance?.Listen(OnShowRequest);
+        if (_settings.CollectorEnabled && _window?.OldAgentInTheWay != true) _collector?.Start();
+        return false;
     }
 
     /// <summary>
@@ -53,7 +174,9 @@ public partial class App : Application
     /// </summary>
     private void RenderToFile(string path, string page)
     {
-        var window = new MainWindow(_settings, passive: true)
+        // Без сбора: снимок не должен ни ставить перехват ввода, ни слать
+        // что-то блоку от имени компьютера.
+        var window = new MainWindow(_settings, collector: null, passive: true)
         {
             Width = 1040,
             Height = 660,
@@ -144,26 +267,39 @@ public partial class App : Application
         };
 
         // Крестик прячет в трей, а не закрывает: приложение должно ждать
-        // блок, даже когда окно человеку не нужно. Выход — из меню трея.
+        // блок и собирать данные, даже когда окно человеку не нужно. Выход —
+        // из меню трея.
         _window.Closing += (_, args) =>
         {
+            if (_quitting) return;
             args.Cancel = true;
             _window.Hide();
         };
     }
 
-    private void ShowWindow()
+    private void ShowWindow(int page = -1)
     {
-        if (_window is null) return;
+        if (_window is null || _quitting) return;
+        if (page >= 0) _window.SelectPage(page);
         _window.Show();
-        _window.WindowState = WindowState.Normal;
+        if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
         _window.Activate();
     }
 
-    private void Quit()
+    private async void Quit()
     {
-        if (_tray is not null) _tray.Visible = false;
-        _tray?.Dispose();
+        if (_quitting) return;
+        _quitting = true;
+        if (_tray is not null)
+        {
+            _tray.Visible = false;
+            _tray.Dispose();
+            _tray = null;
+        }
+        _window?.Hide();
+        // Сбор закрываем по-честному: отключение от брокера — сигнал блоку,
+        // что компьютер ушёл, а не пропал.
+        if (_collector is not null) await _collector.StopAsync();
         Shutdown();
     }
 }

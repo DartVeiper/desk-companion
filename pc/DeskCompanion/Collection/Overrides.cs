@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace DeskAgent;
+namespace DeskCompanion.Collection;
 
 /// <summary>
 /// Ручные исключения: какую программу к чему относить.
@@ -20,7 +20,8 @@ namespace DeskAgent;
 ///
 ///     { "SkyrimSE": "game", "obs64": "other", "Blender": "code" }
 ///
-/// Ключ — имя процесса без .exe, как его показывает `DeskAgent --windows`.
+/// Ключ — имя процесса без .exe, как его показывает разведка на странице
+/// «Компьютер».
 /// Значение — code, browser, game или other.
 /// </summary>
 public static class Overrides
@@ -45,7 +46,7 @@ public static class Overrides
     ///
     /// Проверяем не чаще раза в пять секунд: запрос идёт на каждом круге
     /// опроса, а трогать диск ради этого каждую секунду незачем. Зато
-    /// правка файла подхватывается сама — перезапускать агента не нужно.
+    /// правка файла подхватывается сама — перезапускать ничего не нужно.
     /// </summary>
     private static void Reload()
     {
@@ -72,7 +73,7 @@ public static class Overrides
         }
         catch (Exception)
         {
-            // Битый файл не повод останавливать агента: едем на признаках,
+            // Битый файл не повод останавливать сбор: едем на признаках,
             // как будто исключений нет вовсе.
         }
     }

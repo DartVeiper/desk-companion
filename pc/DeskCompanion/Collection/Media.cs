@@ -1,6 +1,6 @@
 using Windows.Media.Control;
 
-namespace DeskAgent;
+namespace DeskCompanion.Collection;
 
 /// <summary>Что играет прямо сейчас.</summary>
 public readonly record struct Track(string Artist, string Title, bool Playing)

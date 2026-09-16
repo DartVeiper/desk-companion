@@ -2,7 +2,12 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Версия Windows в цели нужна ради списка проигрываемого: он живёт
+         в API самой системы, и без указания версии компилятор о нём не
+         знает. Совместимость со старыми Windows заявлена отдельно: цель
+         говорит «знаю про API десятки», а не «требую её». -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
@@ -44,6 +49,16 @@
          прекрасно берётся по полному имени. -->
     <Using Remove="System.Windows.Forms"/>
     <Using Remove="System.Drawing"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Сбор данных с компьютера — раньше отдельный агент, теперь часть
+         приложения. -->
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Ради этой библиотеки сбор и написан на C#: из Python пришлось бы
+         держать запущенным само приложение LHM и парсить его веб-сервер. -->
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.3" />
   </ItemGroup>
 
   <!-- WindowsForms нужен ровно ради значка в трее: у WPF своего нет, а
