@@ -41,7 +41,10 @@ public sealed class Geocoder
         // Одна буква даёт сотни совпадений и ничего не сообщает.
         if (query.Length < 2) return new List<Place>();
 
-        var url = $"{Api}?name={Uri.EscapeDataString(query)}&count=25&language=ru&format=json";
+        // Страна и область — на языке окна: «Germany, Bavaria» английскому
+        // читателю понятнее, чем «Германия, Бавария».
+        var url = $"{Api}?name={Uri.EscapeDataString(query)}&count=25"
+                  + $"&language={Lang.Code}&format=json";
         try
         {
             using var stream = await _http.GetStreamAsync(url, token);
@@ -70,7 +73,7 @@ public sealed class Geocoder
         catch (Exception error)
         {
             LastError = error is HttpRequestException
-                ? "нет связи с поиском городов"
+                ? Lang.T("city_no_link")
                 : error.Message;
             return new List<Place>();
         }

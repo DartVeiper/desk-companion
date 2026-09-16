@@ -63,4 +63,9 @@ def save(path: Path, section: str, values: dict,
             lines.append(f"{key} = {_format(value)}")
         lines.append("")
 
-    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    # Через временный файл: калибровку тача теперь пишет и работающий
+    # сервис, и обрыв питания посреди записи не должен оставлять вместо
+    # замеров половину файла, с которой блок не поднимется.
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    temp.replace(path)

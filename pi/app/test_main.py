@@ -840,6 +840,166 @@ Application(PreviewDisplay(), sources=[], clock=clock)._apply_touch(
     {"touch": {"max_resistance": 7000}})
 check("без тача вовсе — не падает", True, True)
 
+print("\nКалибровка тача из приложения")
+from app import touch_calibration as calibration_mod  # noqa: E402
+from app.drivers import xpt2046  # noqa: E402
+from app.inputs.events import InputEvent  # noqa: E402
+
+
+class ScriptedPanel:
+    """Панель, которая отдаёт заранее заданные нажатия, по одному на опрос."""
+
+    def __init__(self) -> None:
+        self.script: list = []
+        self.calibration = xpt2046.Calibration()
+        self.max_resistance = 6000.0
+
+    def raw_press(self):
+        return self.script.pop(0) if self.script else None
+
+    def position(self):
+        return None
+
+
+def panel_model(px: int, py: int) -> tuple[int, int]:
+    """Сырые отсчёты настоящей по устройству панели: оси разной длины,
+    экранная X — из сырого Y, экранная Y перевёрнута."""
+    return (round(3900 - py / 319 * 3700), round(400 + px / 479 * 3200))
+
+
+real_paths = (calibration_mod.REQUEST, calibration_mod.STATE)
+real_save = calibration_mod.save
+with tempfile.TemporaryDirectory() as tmp:
+    # Настоящие файлы в папке приложения тесты трогать не должны: иначе
+    # прогон на плате записал бы выдуманную калибровку поверх настоящей.
+    calibration_mod.REQUEST = Path(tmp) / "request"
+    calibration_mod.STATE = Path(tmp) / "state.json"
+    saved: list = []
+    calibration_mod.save = saved.append
+    try:
+        # --- захват нажатий мимо жестов
+        panel = ScriptedPanel()
+        touch_src = TouchSource(panel, recognizer=None)
+        grabbed: list = []
+        touch_src.capture = grabbed.append
+        panel.script = [(100, 200), (500, 900), (110, 210), (105, 205), (104, 204), None]
+        for _ in range(6):
+            touch_src.poll(State())
+        # Выброс (500, 900) — второй отсчёт, но медиана его отбрасывает.
+        check("нажатие отдаётся медианой отсчётов", grabbed, [(105, 205)])
+
+        # Палец отрывается не мгновенно: следующее касание сразу за
+        # принятым — тот же палец, а не новый крестик.
+        panel.script = [(300, 300)] * 4 + [None]
+        for _ in range(5):
+            touch_src.poll(State())
+        check("сразу после нажатия новое не принимается", len(grabbed), 1)
+
+        touch_src._quiet_until = 0.0
+        panel.script = [(7, 7), None]
+        for _ in range(2):
+            touch_src.poll(State())
+        check("касание в один отсчёт — дребезг, не нажатие", len(grabbed), 1)
+
+        panel.script = [(300, 300)] * 4 + [None]
+        for _ in range(5):
+            touch_src.poll(State())
+        check("после паузы нажатие принимается", grabbed[-1], (300, 300))
+
+        # --- полный цикл через сервис
+        panel = ScriptedPanel()
+        touch_src = TouchSource(panel, recognizer=None)
+        calib_app = Application(PreviewDisplay(), sources=[touch_src], clock=clock)
+
+        calibration_mod.write_request("start", "first")
+        calib_app._step_calibration()
+        check("просьба из приложения начала калибровку",
+              calibration_mod.read_state()["state"], "running")
+        check("файл просьбы исполнен и удалён", calibration_mod.REQUEST.exists(), False)
+        check("на экране — крестик, листать нельзя",
+              calib_app.director.current(calib_app.state).name, "touch_calibration")
+        check("нажатия идут в калибровку, а не в жесты", touch_src.capture is not None, True)
+
+        # Правка настроек посреди калибровки пересобирает директор — крестик
+        # при этом пропадать не должен.
+        calib_app._build_screens()
+        check("пересборка экранов калибровку не теряет",
+              calib_app.director.current(calib_app.state).name, "touch_calibration")
+
+        steps = []
+        for target in calibration_mod.targets():
+            calib_app._calibration_press(panel_model(*target))
+            steps.append(calibration_mod.read_state()["step"])
+        check("шаги считаются по крестикам", steps, [2, 3, 4, 4])
+        check("калибровка удалась", calibration_mod.read_state()["state"], "done")
+        check("записана в файл замеров", len(saved), 1)
+        check("ориентация определена по нажатиям",
+              (panel.calibration.swap_xy, panel.calibration.invert_x,
+               panel.calibration.invert_y), (True, False, True))
+        check("применена к панели сразу, без перезапуска",
+              xpt2046.to_screen(*panel_model(240, 160), panel.calibration, 480, 320),
+              (240, 160))
+        check("захват снят — жесты вернулись", touch_src.capture, None)
+        check("итог пока на экране",
+              calib_app.director.current(calib_app.state).name, "touch_calibration")
+
+        calib_app._calibration.result_at -= calibration_mod.RESULT_S + 1
+        calib_app._step_calibration()
+        check("через пару секунд итог убран", calib_app.director.modal, None)
+
+        # --- отмена кнопкой энкодера
+        calibration_mod.write_request("start", "second")
+        calib_app._step_calibration()
+        calib_app.director.handle(InputEvent(Action.NEXT, "encoder", 0.0), calib_app.state)
+        check("вращение калибровку не прерывает",
+              calibration_mod.read_state()["state"], "running")
+        calib_app.director.handle(InputEvent(Action.SELECT, "encoder", 0.0), calib_app.state)
+        check("кнопка энкодера отменяет", calibration_mod.read_state()["state"], "cancelled")
+        check("после отмены калибровка прежняя", len(saved), 1)
+
+        calib_app._calibration.result_at -= calibration_mod.RESULT_S + 1
+        calib_app._step_calibration()
+
+        # --- промах мимо крестика
+        calibration_mod.write_request("start", "third")
+        calib_app._step_calibration()
+        before = panel.calibration
+        targets = calibration_mod.targets()
+        for index, target in enumerate(targets):
+            # Третье нажатие — в середину экрана вместо угла.
+            aim = (240, 160) if index == 2 else target
+            calib_app._calibration_press(panel_model(*aim))
+        state = calibration_mod.read_state()
+        check("нажатие мимо крестика — калибровка отвергнута", state["state"], "failed")
+        check("причина названа", "мимо крестика" in state["detail"], True)
+        check("панель не тронута", panel.calibration is before, True)
+        check("и файл тоже", len(saved), 1)
+
+        calib_app._calibration.result_at -= calibration_mod.RESULT_S + 1
+        calib_app._step_calibration()
+
+        # --- ушли от блока
+        calibration_mod.write_request("start", "fourth")
+        calib_app._step_calibration()
+        calib_app._calibration.last_press -= calibration_mod.IDLE_TIMEOUT_S + 1
+        calib_app._step_calibration()
+        check("без нажатий калибровка отменяется сама",
+              calibration_mod.read_state()["state"], "cancelled")
+
+        calib_app._calibration.result_at -= calibration_mod.RESULT_S + 1
+        calib_app._step_calibration()
+
+        # --- блок без тача
+        bare_app = Application(PreviewDisplay(), sources=[], clock=clock)
+        calibration_mod.write_request("start", "fifth")
+        bare_app._step_calibration()
+        check("без тача — отказ, а не зависший крестик",
+              (calibration_mod.read_state()["state"], bare_app.director.modal),
+              ("failed", None))
+    finally:
+        calibration_mod.REQUEST, calibration_mod.STATE = real_paths
+        calibration_mod.save = real_save
+
 print("\nСнимок для дашборда")
 snap_state = State(now=datetime(2026, 8, 19, 12, 0))
 snap_state.desk.presence = True

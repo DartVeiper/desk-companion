@@ -17,6 +17,9 @@ public partial class App : Application
     {
         base.OnStartup(e);
         _settings = Settings.Load();
+        // Язык — до создания окна: иначе оно на мгновение нарисовалось бы
+        // на русском и перескочило бы.
+        Lang.Use(Argument(e.Args, "--lang") ?? _settings.Language);
 
         // Режим снимка: собрать окно, отрисовать в файл и выйти, не
         // показывая ничего на экране. Нужен, чтобы проверять вёрстку, не
@@ -50,7 +53,7 @@ public partial class App : Application
     /// </summary>
     private void RenderToFile(string path, string page)
     {
-        var window = new MainWindow(_settings)
+        var window = new MainWindow(_settings, passive: true)
         {
             Width = 1040,
             Height = 660,
@@ -119,10 +122,17 @@ public partial class App : Application
         };
         _tray.DoubleClick += (_, _) => ShowWindow();
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Открыть", null, (_, _) => ShowWindow());
+        var open = menu.Items.Add(Lang.T("tray_open"), null, (_, _) => ShowWindow());
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Выход", null, (_, _) => Quit());
+        var quit = menu.Items.Add(Lang.T("tray_quit"), null, (_, _) => Quit());
         _tray.ContextMenuStrip = menu;
+        // Меню трея — WinForms, привязок к словарю у него нет: переименовываем
+        // пункты сами, когда язык меняется.
+        Lang.Changed += () =>
+        {
+            open.Text = Lang.T("tray_open");
+            quit.Text = Lang.T("tray_quit");
+        };
 
         if (_window is null) return;
         // Подсказка значка — единственное, что видно, пока окно закрыто.

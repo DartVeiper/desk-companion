@@ -17,6 +17,15 @@ public sealed class Settings
     public bool StartMinimized { get; set; } = true;
     public bool Autostart { get; set; }
 
+    /// <summary>Язык окна. null — ещё не выбирали: берётся язык системы.</summary>
+    public string? Language { get; set; }
+
+    /// <summary>
+    /// Поднимать агента, если он не работает. Кнопка «Остановить» это
+    /// выключает: иначе остановленный руками агент возвращался бы тут же.
+    /// </summary>
+    public bool AgentManaged { get; set; } = true;
+
     private static string Folder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "DeskCompanion");

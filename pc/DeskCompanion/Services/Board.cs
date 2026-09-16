@@ -13,6 +13,8 @@ public sealed class Live
     public bool Presence;
     public double? WeatherTemp;
     public string? WeatherCond;
+    /// <summary>Код погоды WMO. По нему окно называет погоду на своём языке.</summary>
+    public int? WeatherCode;
     public bool PcOnline;
     public string? ActiveApp;
     public int Keystrokes;
@@ -50,6 +52,11 @@ public sealed class Today
 
 public sealed record ScreenEntry(string Key, string Label, bool On);
 
+/// <summary>Где калибровка тача. Поля повторяют /api/touch-calibration.</summary>
+/// <param name="State">idle, requested, running, done, failed или cancelled.</param>
+/// <param name="Detail">Причина отказа или отмены; у удачной — промах в пикселях.</param>
+public sealed record CalibrationState(string Id, string State, int Step, int Total, string Detail);
+
 /// <summary>
 /// Единственное место, которое ходит на плату по сети.
 ///
@@ -69,6 +76,14 @@ public sealed class Board
     public string? LastError { get; private set; }
 
     private string Url(string path) => $"http://{Host}:{Port}{path}";
+
+    /// <summary>
+    /// Адрес с языком. Подписи экранов, погоду и неполадки блок отдаёт на
+    /// том языке, который попросили: иначе английское окно показывало бы
+    /// русские подписи вперемешку со своими.
+    /// </summary>
+    private static string Localized(string path)
+        => $"{path}{(path.Contains('?') ? '&' : '?')}lang={Lang.DeviceCode}";
 
     private async Task<JsonDocument?> GetAsync(string path, CancellationToken token)
     {
@@ -94,16 +109,16 @@ public sealed class Board
 
     private static string Explain(Exception error) => error switch
     {
-        TaskCanceledException => "плата не ответила вовремя",
+        TaskCanceledException => Lang.T("board_timeout"),
         HttpRequestException http when http.Message.Contains("No such host")
-            => "адрес не находится в сети",
-        HttpRequestException => "нет связи с платой",
+            => Lang.T("board_no_host"),
+        HttpRequestException => Lang.T("board_no_link"),
         _ => error.Message,
     };
 
     public async Task<Live?> LiveAsync(CancellationToken token = default)
     {
-        using var doc = await GetAsync("/api/live", token);
+        using var doc = await GetAsync(Localized("/api/live"), token);
         if (doc is null) return null;
 
         var root = doc.RootElement;
@@ -120,6 +135,7 @@ public sealed class Board
             Presence = Bool(root, "presence"),
             WeatherTemp = Double(weather, "temp"),
             WeatherCond = Str(weather, "cond"),
+            WeatherCode = Int(weather, "code"),
             PcOnline = Bool(root, "pc_online"),
             ActiveApp = Str(pc, "active_app"),
             Keystrokes = Int(pc, "keystrokes") ?? 0,
@@ -181,7 +197,7 @@ public sealed class Board
 
     public async Task<List<ScreenEntry>?> ScreensAsync(CancellationToken token = default)
     {
-        using var doc = await GetAsync("/api/settings", token);
+        using var doc = await GetAsync(Localized("/api/settings"), token);
         if (doc is null) return null;
         if (!doc.RootElement.TryGetProperty("screens", out var screens)) return null;
 
@@ -266,21 +282,72 @@ public sealed class Board
 
     private async Task<bool> PostSettingsAsync(object payload, CancellationToken token)
     {
+        using var doc = await PostAsync("/api/settings", payload, token);
+        return doc is not null;
+    }
+
+    /// <summary>Отправить JSON. null — не вышло, причина в LastError.</summary>
+    private async Task<JsonDocument?> PostAsync(string path, object payload, CancellationToken token)
+    {
         var body = new StringContent(JsonSerializer.Serialize(payload),
                                      Encoding.UTF8, "application/json");
         try
         {
-            var response = await _http.PostAsync(Url("/api/settings"), body, token);
-            LastError = response.IsSuccessStatusCode ? null : $"плата ответила {(int)response.StatusCode}";
-            return response.IsSuccessStatusCode;
+            var response = await _http.PostAsync(Url(path), body, token);
+            var text = await response.Content.ReadAsStringAsync(token);
+            if (!response.IsSuccessStatusCode)
+            {
+                // Блок объясняет отказ телом ответа — показываем его, а не
+                // один голый код: «400» человеку не говорит ничего.
+                LastError = ErrorFrom(text) ?? Lang.T("board_status", (int)response.StatusCode);
+                return null;
+            }
+            LastError = null;
+            return JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error)
         {
             LastError = Explain(error);
-            return false;
+            return null;
         }
     }
+
+    private static string? ErrorFrom(string text)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return Str(doc.RootElement, "error");
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------ калибровка тача
+
+    public async Task<CalibrationState?> CalibrationAsync(CancellationToken token = default)
+    {
+        using var doc = await GetAsync(Localized("/api/touch-calibration"), token);
+        return doc is null ? null : ReadCalibration(doc.RootElement);
+    }
+
+    /// <summary>Начать ("start") или отменить ("cancel") калибровку.</summary>
+    public async Task<CalibrationState?> RequestCalibrationAsync(string action,
+                                                                 CancellationToken token = default)
+    {
+        using var doc = await PostAsync(Localized("/api/touch-calibration"), new { action }, token);
+        return doc is null ? null : ReadCalibration(doc.RootElement);
+    }
+
+    private static CalibrationState ReadCalibration(JsonElement root) => new(
+        Str(root, "id") ?? "",
+        Str(root, "state") ?? "idle",
+        Int(root, "step") ?? 0,
+        Int(root, "total") ?? 4,
+        Str(root, "detail") ?? "");
 
     /// <summary>
     /// Скачать базу целиком. null — не отдалась.

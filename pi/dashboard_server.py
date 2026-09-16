@@ -25,7 +25,8 @@ from urllib.parse import parse_qs, urlparse
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
-from app import settings, status  # noqa: E402
+from app import lang, settings, status  # noqa: E402
+from app import touch_calibration  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.screens.registry import load_config  # noqa: E402
 from app.stats import WINDOW_HOURS, day_summary, streak_days, week_summary  # noqa: E402
@@ -92,12 +93,17 @@ def api_events(limit: int) -> dict:
     } for r in rows]}
 
 
-def api_live() -> dict:
+def api_live(language: str = "ru") -> dict:
     """Живое состояние из снимка, который пишет сервис.
 
     Отдельно от базы: туда идут агрегаты раз в минуту, а здоровье блока и
     энергия по зонам радара нужны «прямо сейчас» — в базу они не попадают
     вовсе.
+
+    Текст для человека — погоду и неполадки — отдаём на языке, который
+    попросил клиент. Снимок сервис пишет по-русски, а приложение на ПК может
+    работать на другом языке, и без этого английское окно показывало бы
+    русские подписи вперемешку со своими.
     """
     snapshot = status.read()
     if snapshot is None:
@@ -112,6 +118,12 @@ def api_live() -> dict:
     if radar and radar.get("moving_gates"):
         radar["gate_labels"] = [f"{i * 75}–{(i + 1) * 75} см"
                                 for i in range(len(radar["moving_gates"]))]
+    weather = snapshot.get("weather")
+    if weather and weather.get("cond"):
+        weather["cond"] = lang.translate(weather["cond"], language)
+    for problem in snapshot.get("problems", []):
+        problem["label"] = lang.translate(problem["label"], language)
+        problem["detail"] = lang.translate(problem["detail"], language)
     return snapshot
 
 
@@ -138,7 +150,7 @@ AMBIENT_CATALOG = (
 )
 
 
-def api_settings() -> dict:
+def api_settings(language: str = "ru") -> dict:
     current = settings.load()
     config = settings.apply(load_config(CONFIG_PATH))
     enabled = list(config["screens"]["enabled"])
@@ -149,9 +161,10 @@ def api_settings() -> dict:
     ordered = [k for k in enabled if k in labels]
     ordered += [k for k, _ in SCREEN_CATALOG if k not in enabled]
     return {
-        "screens": [{"key": k, "label": labels[k], "on": k in enabled}
+        "screens": [{"key": k, "label": lang.translate(labels[k], language),
+                     "on": k in enabled}
                     for k in ordered],
-        "ambient": [{"key": k, "label": label,
+        "ambient": [{"key": k, "label": lang.translate(label, language),
                      "on": k in config.get("ambient", {}).get("enabled", [])}
                     for k, label in AMBIENT_CATALOG],
         "values": {
@@ -219,6 +232,33 @@ def save_settings(payload: dict) -> dict:
 
     settings.save(values)
     return api_settings()
+
+
+def api_touch_calibration(language: str = "ru") -> dict:
+    """На каком шаге калибровка тача. Причину неудачи — на языке клиента."""
+    state = touch_calibration.read_state()
+    if state.get("detail"):
+        state["detail"] = lang.translate(state["detail"], language)
+    return state
+
+
+def request_touch_calibration(payload: dict, language: str = "ru") -> dict:
+    """Попросить сервис начать или отменить калибровку.
+
+    Сервис заметит просьбу за один проход цикла — это доли секунды. Ответ
+    отдаём с состоянием «ждём сервис», а не с прежним: иначе приложение
+    успело бы увидеть итог прошлой калибровки и принять его за нынешний.
+    """
+    import uuid
+
+    action = payload.get("action")
+    if action not in ("start", "cancel"):
+        return {"state": "failed", "detail": "неизвестное действие"}
+    request_id = uuid.uuid4().hex[:12]
+    touch_calibration.write_request(action, request_id)
+    state = api_touch_calibration(language)
+    state.update({"id": request_id, "state": "requested"})
+    return state
 
 
 def api_health() -> dict:
@@ -751,6 +791,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:
         pass
 
+    def _fail(self, code: int, text: str) -> None:
+        """Отказ с объяснением — телом ответа, а не строкой статуса.
+
+        send_error кладёт текст в строку статуса, а её http.server кодирует
+        в latin-1. Кириллица там роняла обработчик, и вместо «400, битый
+        JSON» клиент получал оборванное соединение без единого слова.
+        """
+        body = json.dumps({"error": text}, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send(self, body: bytes, ctype: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", ctype)
@@ -760,15 +814,31 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/settings":
+        url = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        handlers = {
+            "/api/settings": lambda body: save_settings(body),
+            "/api/touch-calibration":
+                lambda body: request_touch_calibration(body, q.get("lang", "ru")),
+        }
+        handler = handlers.get(url.path)
+        if handler is None:
             return self.send_error(404)
         length = int(self.headers.get("Content-Length", 0))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
-            return self.send_error(400, "битый JSON")
-        body = json.dumps(save_settings(payload), ensure_ascii=False).encode()
-        self._send(body, "application/json")
+            return self._fail(400, "битый JSON")
+        if not isinstance(payload, dict):
+            return self._fail(400, "ждём JSON-объект")
+        # Кривой запрос не должен рвать соединение без ответа. Так и было:
+        # приложение слало экраны не в том виде, обработчик падал, и клиент
+        # видел только оборванное соединение — без единого слова о причине.
+        try:
+            result = handler(payload)
+        except (TypeError, ValueError, KeyError) as error:
+            return self._fail(400, f"не разобрать запрос: {error}")
+        self._send(json.dumps(result, ensure_ascii=False).encode(), "application/json")
 
     def do_GET(self) -> None:
         url = urlparse(self.path)
@@ -777,8 +847,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/today": api_today,
             "/api/week": api_week,
             "/api/health": api_health,
-            "/api/live": api_live,
-            "/api/settings": api_settings,
+            "/api/live": lambda: api_live(q.get("lang", "ru")),
+            "/api/settings": lambda: api_settings(q.get("lang", "ru")),
+            "/api/touch-calibration": lambda: api_touch_calibration(q.get("lang", "ru")),
             "/api/events": lambda: api_events(int(q.get("limit", 50))),
         }
 

@@ -295,10 +295,58 @@ check("сильнее нажатие — меньше сопротивление
       xpt2046.touch_resistance(3000, 3050, 2000)
       < xpt2046.touch_resistance(300, 3050, 2000), True)
 
-print("\nТач XPT2046: калибровка по углам")
-built = xpt2046.calibration_from_corners((3700, 400), (350, 3750))
-check("границы упорядочены независимо от порядка углов",
-      (built.x_min, built.x_max, built.y_min, built.y_max), (350, 3700, 400, 3750))
+
+print("\nТач XPT2046: калибровка по четырём углам")
+# Модель панели с осями разной длины — как у настоящей. Старая калибровка
+# на такой промахивалась мимо крестика на 35–43 пикселя: путала оси при
+# swap_xy и не учитывала отступ крестиков от края. Проверяем не то, что
+# границы как-то посчитаны, а главное: нажал в точку — попал в неё.
+CAL_W, CAL_H, CAL_M = 480, 320, 34
+
+
+def model_panel(swap, inv_x, inv_y):
+    def press(px, py):
+        fx, fy = px / (CAL_W - 1), py / (CAL_H - 1)
+        if inv_x:
+            fx = 1 - fx
+        if inv_y:
+            fy = 1 - fy
+        a = 400 + fx * 3200   # канал экранной X
+        b = 200 + fy * 3700   # канал экранной Y, длиннее
+        return (round(b), round(a)) if swap else (round(a), round(b))
+    return press
+
+
+cal_corners = [(CAL_M, CAL_M), (CAL_W - CAL_M, CAL_M),
+               (CAL_W - CAL_M, CAL_H - CAL_M), (CAL_M, CAL_H - CAL_M)]
+cal_probes = [(CAL_M, CAL_M), (240, 160), (CAL_W - CAL_M, CAL_H - CAL_M),
+              (5, 5), (474, 314), (100, 250)]
+for swap in (True, False):
+    for inv_x in (False, True):
+        for inv_y in (False, True):
+            panel_press = model_panel(swap, inv_x, inv_y)
+            cal, _ = xpt2046.calibration_from_presses(
+                [(c, panel_press(*c)) for c in cal_corners], CAL_W, CAL_H)
+            miss = max(
+                ((got[0] - p[0]) ** 2 + (got[1] - p[1]) ** 2) ** 0.5
+                for p in cal_probes
+                for got in [xpt2046.to_screen(*panel_press(*p), cal, CAL_W, CAL_H)])
+            check(f"ориентация угадана: swap={swap} inv_x={inv_x} inv_y={inv_y}",
+                  (cal.swap_xy, cal.invert_x, cal.invert_y), (swap, inv_x, inv_y))
+            check(f"нажатие попадает в точку, включая края ({swap}/{inv_x}/{inv_y})",
+                  miss < 1.5, True)
+
+# Порядок нажатий не важен: углы узнаются по тому, куда целились.
+reordered = [(c, model_panel(True, False, True)(*c)) for c in reversed(cal_corners)]
+_, worst_reordered = xpt2046.calibration_from_presses(reordered, CAL_W, CAL_H)
+check("порядок углов не важен", worst_reordered < 1.5, True)
+
+try:
+    xpt2046.calibration_from_presses(
+        [((CAL_M, CAL_M), (1, 1))] * 4, CAL_W, CAL_H)
+    check("четыре нажатия в один угол отвергнуты", False, True)
+except ValueError:
+    check("четыре нажатия в один угол отвергнуты", True, True)
 
 print("\nТач XPT2046: чтение через заглушку")
 

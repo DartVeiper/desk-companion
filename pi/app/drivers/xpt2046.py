@@ -158,26 +158,103 @@ class Xpt2046:
 
     def position(self) -> tuple[int, int] | None:
         """Координаты касания в пикселях. None — касания нет."""
+        raw = self.raw_press()
+        if raw is None:
+            return None
+        return to_screen(raw[0], raw[1], self.calibration, self.width, self.height)
+
+    def raw_press(self) -> tuple[int, int] | None:
+        """Сырые отсчёты касания, без пересчёта в пиксели. None — касания нет.
+
+        Нужно калибровке: пересчитывать в пиксели ещё нечем, её для того и
+        делают. Порог силы при этом тот же, что у обычного касания, —
+        калибровать надо тем нажатием, каким человек и будет пользоваться.
+        """
         if self.resistance() > self.max_resistance:
             return None
-        raw_x, raw_y = self.raw()
-        return to_screen(raw_x, raw_y, self.calibration, self.width, self.height)
+        return self.raw()
 
 
-def calibration_from_corners(
-    top_left: tuple[int, int], bottom_right: tuple[int, int],
-    swap_xy: bool = True, invert_x: bool = False, invert_y: bool = True,
-) -> Calibration:
-    """Собрать калибровку по двум замерам в противоположных углах.
+#: Нажатие при калибровке: куда целились (пиксели) и что прочла панель.
+Press = tuple[tuple[int, int], tuple[int, int]]
 
-    Разово: скрипт рисует крестик, вы жмёте, он запоминает сырые значения.
-    Границы упорядочиваем сами — какой угол даст большее число, зависит от
-    ориентации панели, и заставлять человека об этом думать незачем.
+
+def calibration_from_presses(presses: list[Press], width: int,
+                             height: int) -> tuple[Calibration, float]:
+    """Калибровка по нажатиям в четыре угла. Возвращает её и худший промах.
+
+    Заменяет прежний расчёт по двум углам, у которого было две ошибки
+    сразу, и обе незаметны, пока панель не откалибрована по-настоящему.
+
+    Первая — оси. to_screen при swap_xy берёт экранную X из сырого Y, а
+    старый расчёт клал в x_min/x_max диапазон сырого X. У панели с осями
+    одной длины это не видно; у настоящей — видно сразу.
+
+    Вторая — отступ. Крестики стоят в тридцати пикселях от края, иначе в
+    них не попасть пальцем, а границы считались так, будто нажали в самый
+    угол. Разметка растягивалась, и к краям промах рос.
+
+    Вместе на модели панели это давало промах 35–43 пикселя точно по
+    крестику — ровно «мелкие кнопки мажут». Здесь прямая строится по
+    нажатиям и продолжается до краёв экрана.
+
+    Ориентацию тоже берём из нажатий, а не из конфига. Между левым и правым
+    верхним углом меняется только экранная X, и какой сырой канал при этом
+    сдвинулся сильнее — тот её и задаёт. Знак наклона говорит, перевёрнута
+    ли ось. Так калибровка чинит и перепутанную в конфиге ориентацию, а не
+    закрепляет её.
+
+    Порядок нажатий любой: углы узнаются по тому, куда целились.
     """
-    x_values = sorted((top_left[0], bottom_right[0]))
-    y_values = sorted((top_left[1], bottom_right[1]))
-    return Calibration(
-        x_min=x_values[0], x_max=x_values[1],
-        y_min=y_values[0], y_max=y_values[1],
-        swap_xy=swap_xy, invert_x=invert_x, invert_y=invert_y,
-    )
+    if len(presses) < 4:
+        raise ValueError("нужно четыре нажатия, по одному в каждый угол")
+
+    xs = sorted({target[0] for target, _ in presses})
+    ys = sorted({target[1] for target, _ in presses})
+    if len(xs) < 2 or len(ys) < 2:
+        raise ValueError("нажатия должны быть в разных углах")
+    left, right, top, bottom = xs[0], xs[-1], ys[0], ys[-1]
+
+    def mean_raw(where) -> tuple[float, float]:
+        chosen = [raw for target, raw in presses if where(target)]
+        return (sum(r[0] for r in chosen) / len(chosen),
+                sum(r[1] for r in chosen) / len(chosen))
+
+    # Среднее по двум углам на каждой стороне: так гасится и дрожание
+    # пальца, и небольшой перекос панели.
+    on_left = mean_raw(lambda t: t[0] == left)
+    on_right = mean_raw(lambda t: t[0] == right)
+    on_top = mean_raw(lambda t: t[1] == top)
+    on_bottom = mean_raw(lambda t: t[1] == bottom)
+
+    # Какой канал сильнее меняется слева направо — тот и экранная X.
+    moved_x = abs(on_right[0] - on_left[0])
+    moved_y = abs(on_right[1] - on_left[1])
+    swap = moved_y > moved_x
+    channel = 1 if swap else 0
+
+    def axis(near: float, far: float, near_px: int, far_px: int,
+             size: int) -> tuple[int, int, bool]:
+        per_px = (far - near) / (far_px - near_px)
+        at_zero = near - near_px * per_px
+        at_edge = at_zero + (size - 1) * per_px
+        low, high = sorted((at_zero, at_edge))
+        # Сырое значение убывает к краю — ось перевёрнута.
+        return round(low), round(high), per_px < 0
+
+    x_min, x_max, invert_x = axis(on_left[channel], on_right[channel],
+                                  left, right, width)
+    other = 1 - channel
+    y_min, y_max, invert_y = axis(on_top[other], on_bottom[other],
+                                  top, bottom, height)
+
+    calibration = Calibration(x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max,
+                              swap_xy=swap, invert_x=invert_x, invert_y=invert_y)
+
+    worst = 0.0
+    for (tx, ty), (raw_x, raw_y) in presses:
+        gx, gy = to_screen(raw_x, raw_y, calibration, width, height)
+        worst = max(worst, ((gx - tx) ** 2 + (gy - ty) ** 2) ** 0.5)
+    return calibration, worst
+
+

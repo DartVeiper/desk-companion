@@ -64,12 +64,40 @@ def t(text: str, *, note: bool = True) -> str:
     """
     if _language == "ru":
         return text
-    found = EN.get(text)
+    found = _english(text)
     if found is not None:
         return found
     if note and has_cyrillic(text):
         missed.add(text)
     return text
+
+
+def translate(text: str, code: str) -> str:
+    """Перевести на заданный язык, не трогая выбранный для экрана.
+
+    Нужно дашборду: приложение на ПК просит данные на своём языке, и
+    переключать ради этого язык всего блока было бы неправильно — экран
+    на секунду заговорил бы на чужом.
+    """
+    if code != "en":
+        return text
+    found = _english(text)
+    return text if found is None else found
+
+
+def _english(text: str) -> str | None:
+    found = EN.get(text)
+    if found is not None:
+        return found
+    # Шаблоны — только для кириллицы: цифры и английские строки идут через
+    # draw.text десятки раз за кадр, и гонять по ним регулярки незачем.
+    if not has_cyrillic(text):
+        return None
+    for pattern, template in _PATTERNS:
+        match = pattern.fullmatch(text)
+        if match:
+            return template.format(**match.groupdict())
+    return None
 
 
 class Translating:
@@ -332,4 +360,67 @@ EN: dict[str, str] = {
     # Название города подставляется после перевода и остаётся как есть:
     # переводится подпись, а не имя места.
     "Погода — {}": "Weather — {}",
+    # ------------------------------------------ подписи в списке настроек
+    # Дашборд называет экраны иначе, чем их заголовки на самом экране:
+    # в списке нужна ясность, на экране — краткость.
+    "Часы и погода": "Clock and weather",
+    "Прогноз по частям суток": "Forecast by part of day",
+    # -------------------------------------------------- неполадки блока
+    # На экран блока выводятся только метки, а подробности — в приложение
+    # и в дашборд. Поэтому прогон экранов их не ловил, и почти все они
+    # оставались русскими.
+    "нет брокера": "no broker",
+    "нет радара": "no radar",
+    "просадки напряжения — проверь блок и кабель":
+        "undervoltage — check the power supply and the cable",
+    "WiFi отвалился: нет времени по NTP и погоды":
+        "Wi-Fi dropped: no network time and no weather",
+    "mosquitto не отвечает — ПК-агент не достучится":
+        "mosquitto is not responding — the PC agent cannot reach the board",
+    "датчик воздуха замолчал — снять питание с платы физически, перезагрузка не помогает":
+        "the air sensor went silent — cut power to the board physically, a reboot does not help",
+    "LD2410 молчит по UART — присутствие не определяется":
+        "LD2410 is silent on UART — presence is not detected",
+    # --------------------------------------------------- калибровка тача
+    "Калибровка экрана": "Touch calibration",
+    "нажми точно в крестик": "press the centre of the cross",
+    "кнопка энкодера — отмена": "encoder button cancels",
+    "готово": "done",
+    "не вышло": "failed",
+    "отменено": "cancelled",
+    "никто не нажимал три минуты": "no press for three minutes",
+    "на этом блоке нет тача": "this device has no touch panel",
+    "отменено из приложения": "cancelled from the app",
+    "отменено кнопкой энкодера": "cancelled with the encoder button",
+    "нужно четыре нажатия, по одному в каждый угол":
+        "four presses are needed, one in each corner",
+    "нажатия должны быть в разных углах": "the presses must be in different corners",
 }
+
+#: Строки, в которые вписано число. Словарём их не найти: ключом была бы
+#: «на карте свободно 5%», а завтра там будет 4. Большинство таких мест
+#: переводят шаблон до подстановки — `t("{} мин").format(...)`, — но
+#: неполадки собираются там, где язык ещё неизвестен, и приходят готовыми.
+#:
+#: Имя в фигурных скобках ловит любой текст и переносится в перевод.
+TEMPLATES: dict[str, str] = {
+    "на карте свободно {pct}%": "{pct}% free on the card",
+    # Калибровка тача: итог собирается из промаха в пикселях.
+    "точность {px} px": "accuracy {px} px",
+    "нажатие ушло мимо крестика на {px} px — попробуй ещё раз":
+        "a press missed its cross by {px} px — try again",
+    "не записалось: {error}": "could not save: {error}",
+}
+
+
+def _compile(template: str):
+    import re
+
+    parts = re.split(r"\{(\w+)\}", template)
+    # Чётные куски — текст как есть, нечётные — имена подстановок.
+    pattern = "".join(re.escape(part) if i % 2 == 0 else f"(?P<{part}>.+?)"
+                      for i, part in enumerate(parts))
+    return re.compile(pattern)
+
+
+_PATTERNS = [(_compile(source), target) for source, target in TEMPLATES.items()]

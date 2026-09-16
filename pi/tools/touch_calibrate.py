@@ -3,7 +3,7 @@
     python3 tools/touch_calibrate.py
 
 Рисует крестик, ждёт нажатия — **сколько угодно долго**, без отсчётов. Жми
-когда удобно. Достаточно трёх нажатий.
+когда удобно. Нажатий пять: четыре угла и проверка в центре.
 
 Делает две вещи сразу, потому что данные для обеих берутся из одних и тех
 же нажатий:
@@ -49,6 +49,7 @@ import _service  # noqa: E402
 
 from app import settings  # noqa: E402
 from app import theme  # noqa: E402
+from app import touch_calibration  # noqa: E402
 from app.drivers import xpt2046  # noqa: E402
 from app.screens.registry import load_config  # noqa: E402
 
@@ -56,7 +57,6 @@ CONFIG = Path(__file__).resolve().parents[1] / "app" / "config.toml"
 # Замеры пишем отдельно: config.toml приезжает с кодом и при
 # следующей доставке затёр бы их.
 MEASURED = CONFIG.parent / "calibration.toml"
-MARGIN = 34
 SETTLE_S = 0.4      # пауза после отпускания, чтобы не поймать дребезг
 IDLE_SAMPLES = 80   # сколько замеров покоя снять перед началом
 
@@ -168,20 +168,24 @@ def main() -> None:
 
     floor = max(idle_peak + 2, 8)
     presses = []
-    corners = []
+    corners: list[xpt2046.Press] = []
     forces: list[float] = []
-    for x, y, caption in (
-        (MARGIN, MARGIN, "жми точно в крестик"),
-        (theme.WIDTH - MARGIN, theme.HEIGHT - MARGIN, "теперь в этот"),
-    ):
+    # Четыре угла, а не два: по двум нельзя ни отличить поворот панели от
+    # зеркала, ни усреднить дрожание пальца. Раньше углов было два, и
+    # расчёт по ним промахивался мимо самих крестиков на 35–43 пикселя.
+    for index, (x, y) in enumerate(touch_calibration.targets()):
+        caption = "жми точно в крестик" if index == 0 else f"теперь в этот · {index + 1} / 4"
         target(display, x, y, caption, "нажимай как привычно, без усилия")
         raw_x, raw_y, peak, force = wait_press(panel, floor)
-        corners.append((raw_x, raw_y))
+        corners.append(((x, y), (raw_x, raw_y)))
         presses.append(peak)
         forces.append(force)
         print(f"  угол ({x:3}, {y:3}) -> сырые ({raw_x:4}, {raw_y:4}), z1 {peak}")
 
-    calibration = xpt2046.calibration_from_corners(corners[0], corners[1])
+    calibration, worst = xpt2046.calibration_from_presses(corners, theme.WIDTH, theme.HEIGHT)
+    print(f"  ориентация: swap={calibration.swap_xy} "
+          f"invert_x={calibration.invert_x} invert_y={calibration.invert_y}, "
+          f"промах по углам {worst:.0f} px")
 
     target(display, theme.WIDTH // 2, theme.HEIGHT // 2,
            "проверка: жми в центр", "нажимай как привычно")

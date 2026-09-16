@@ -1,8 +1,9 @@
 """Снимки приложения для документации.
 
-    py pc/shots.py
+    py pc/shots.py          # docs/приложение.png, по-русски
+    py pc/shots.py --en     # docs/app.png, по-английски
 
-Снимает страницы окна и склеивает их в одну картинку docs/приложение.png.
+Снимает страницы окна и склеивает их в одну картинку.
 
 Зачем скриптом. В README сказано, что все картинки в docs/ собираются
 кодом, и это не поза: картинка, собранная руками, устаревает молча.
@@ -26,7 +27,9 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / "Программа" / "DeskCompanion.exe"
-OUT = ROOT / "docs" / "приложение.png"
+ENGLISH = "--en" in sys.argv
+LANGUAGE = "en" if ENGLISH else "ru"
+OUT = ROOT / "docs" / ("app.png" if ENGLISH else "приложение.png")
 
 #: Какие страницы показать и в каком порядке. Номера — те же, что у кнопок
 #: слева: обзор, экраны, статистика, настройки.
@@ -38,7 +41,8 @@ MARGIN = 16     # поля вокруг всего
 
 def shot(page: str, folder: Path) -> Image.Image | None:
     target = folder / f"page{page}.png"
-    subprocess.run([str(EXE), "--shot", str(target), "--page", page], check=False)
+    subprocess.run([str(EXE), "--shot", str(target), "--page", page,
+                    "--lang", LANGUAGE], check=False)
 
     # Окно рисует себя и выходит само, но выход асинхронный: без ожидания
     # файл открывается наполовину записанным.

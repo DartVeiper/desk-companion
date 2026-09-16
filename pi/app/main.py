@@ -39,6 +39,8 @@ from app.screens import widgets  # noqa: E402
 from app.sources.base import Source  # noqa: E402
 from app import settings as settings_mod  # noqa: E402
 from app import status as status_mod  # noqa: E402
+from app import touch_calibration as calibration_mod  # noqa: E402
+from app.drivers import xpt2046  # noqa: E402
 from app.state import State  # noqa: E402
 from app.db import Database  # noqa: E402
 
@@ -221,6 +223,10 @@ class Application:
 
         self.config_path = config_path
         self._settings_mtime = settings_mod.mtime()
+        #: Идущая калибровка тача. Живёт здесь, а не в директоре: директор
+        #: пересобирается при каждой правке настроек, и калибровка посреди
+        #: нажатий пропадала бы вместе с ним.
+        self._calibration: calibration_mod.Session | None = None
         self._build_screens()
 
         self._running = False
@@ -265,6 +271,8 @@ class Application:
             [registry_mod.instantiate(e) for e in config["screens"]["enabled"]],
         )
         self.director = director_mod.from_config(config, registry)
+        if self._calibration is not None:
+            self._show_calibration()
         self._apply_touch(config)
         self._apply_location(config)
 
@@ -382,6 +390,7 @@ class Application:
             self._forget_time()
 
         dirty = self._reload_settings()
+        dirty |= self._step_calibration()
         for source in self.sources:
             dirty |= source.tick(self.state)
         self._sensor_health()
@@ -420,6 +429,128 @@ class Application:
         self._dirty = False
         self._render(screen)
         return True
+
+    # ------------------------------------------------------ калибровка тача
+
+    def _touch_source(self):
+        for source in self.sources:
+            if getattr(source, "name", "") == "touch" and hasattr(source, "capture"):
+                return source
+        return None
+
+    def _step_calibration(self) -> bool:
+        """Просьба из приложения, таймаут и уборка итога. True — нужен кадр.
+
+        Файл просьбы проверяем одним stat за проход: просьба приходит раз в
+        месяц, а проход случается двадцать раз в секунду.
+        """
+        changed = False
+        if calibration_mod.REQUEST.exists():
+            request = calibration_mod.read_request() or {}
+            action = request.get("action")
+            if action == "start":
+                changed |= self._start_calibration(str(request.get("id", "")))
+            elif action == "cancel":
+                changed |= self._cancel_calibration("отменено из приложения")
+
+        session = self._calibration
+        if session is None:
+            return changed
+        now = time.monotonic()
+        if session.idle(now):
+            self._cancel_calibration("никто не нажимал три минуты")
+            return True
+        if session.result_shown(now):
+            self._close_calibration()
+            return True
+        return changed
+
+    def _start_calibration(self, request_id: str) -> bool:
+        session = calibration_mod.Session(id=request_id)
+        touch = self._touch_source()
+        if touch is None:
+            calibration_mod.write_state(session, "failed", "на этом блоке нет тача")
+            return False
+        self._calibration = session
+        touch.capture = self._calibration_press
+        self._show_calibration()
+        calibration_mod.write_state(session, "running")
+        print("  калибровка тача: начата")
+        return True
+
+    def _show_calibration(self) -> None:
+        self.director.modal = calibration_mod.CalibrationScreen(self._calibration)
+        self.director.on_modal_cancel = lambda: self._cancel_calibration(
+            "отменено кнопкой энкодера")
+
+    def _calibration_press(self, raw: tuple[int, int]) -> None:
+        session = self._calibration
+        if session is None:
+            return
+        if not session.add(raw):
+            calibration_mod.write_state(session, "running")
+            return
+
+        # Все четыре угла собраны. Нажатия больше не ловим — на экране итог.
+        touch = self._touch_source()
+        if touch is not None:
+            touch.capture = None
+        try:
+            calibration, worst = xpt2046.calibration_from_presses(
+                session.presses, theme.WIDTH, theme.HEIGHT)
+        except ValueError as error:
+            self._fail_calibration(str(error))
+            return
+
+        # Большой промах по самим нажатиям — значит, одно из них ушло мимо
+        # крестика. Такую калибровку не сохраняем: она испортила бы тач
+        # сильнее, чем было до неё.
+        if worst > calibration_mod.MAX_MISS_PX:
+            self._fail_calibration(
+                f"нажатие ушло мимо крестика на {worst:.0f} px — попробуй ещё раз")
+            return
+        try:
+            calibration_mod.save(calibration)
+        except OSError as error:
+            self._fail_calibration(f"не записалось: {error}")
+            return
+
+        if touch is not None:
+            touch.touch.calibration = calibration
+        session.finish("done", f"точность {worst:.0f} px")
+        calibration_mod.write_state(session, "done", f"{worst:.0f}")
+        print(f"  калибровка тача: готово, худший промах {worst:.1f} px")
+
+    def _fail_calibration(self, detail: str) -> None:
+        session = self._calibration
+        if session is None:
+            return
+        session.finish("failed", detail)
+        calibration_mod.write_state(session, "failed", detail)
+        print(f"  калибровка тача: не вышло — {detail}")
+
+    def _cancel_calibration(self, reason: str = "") -> bool:
+        session = self._calibration
+        if session is None:
+            return False
+        touch = self._touch_source()
+        if touch is not None:
+            touch.capture = None
+        if session.result is None:
+            session.finish("cancelled", reason)
+            calibration_mod.write_state(session, "cancelled", reason)
+            print(f"  калибровка тача: отменена ({reason or 'без причины'})")
+        self._dirty = True
+        return True
+
+    def _close_calibration(self) -> None:
+        self._calibration = None
+        self.director.modal = None
+        self.director.on_modal_cancel = None
+        touch = self._touch_source()
+        if touch is not None:
+            touch.capture = None
+        self._dirty = True
 
     def _frame_gap(self) -> float:
         """Сколько ждать после предыдущего кадра."""

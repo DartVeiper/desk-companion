@@ -1,11 +1,15 @@
 <Window x:Class="DeskCompanion.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:DeskCompanion.Services"
         Title="Desk Companion" Height="660" Width="1040"
         MinHeight="560" MinWidth="880"
         Background="{StaticResource Bg}"
         FontFamily="{StaticResource UiFont}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <!-- Все надписи — через {l:T ключ}: текст лежит в Strings, по словарю на
+         язык, и меняется на лету вместе с выбранным языком. -->
 
     <Grid>
         <Grid.ColumnDefinitions>
@@ -20,7 +24,7 @@
                 <StackPanel DockPanel.Dock="Top" Margin="22,26,18,26">
                     <TextBlock Text="Desk Companion" Foreground="{StaticResource Fg}"
                                FontSize="15" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="SubTitle" Text="ищу плату" FontSize="11"
+                    <TextBlock x:Name="SubTitle" Text="{l:T link_searching}" FontSize="11"
                                Foreground="{StaticResource Dim}" Margin="0,3,0,0"/>
                 </StackPanel>
 
@@ -32,7 +36,7 @@
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="LinkDot" Width="8" Height="8"
                                      Fill="{StaticResource Dim}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="LinkText" Text="нет связи" Margin="8,0,0,0"
+                            <TextBlock x:Name="LinkText" Text="{l:T link_none}" Margin="8,0,0,0"
                                        FontSize="12" Foreground="{StaticResource Dim}"/>
                         </StackPanel>
                         <TextBlock x:Name="LinkDetail" Text="" FontSize="10" TextWrapping="Wrap"
@@ -42,13 +46,16 @@
 
                 <StackPanel>
                     <RadioButton x:Name="NavOverview" Style="{StaticResource NavButton}"
-                                 Content="Обзор" IsChecked="True" Checked="Nav_Checked" Tag="0"/>
+                                 Content="{l:T nav_overview}" IsChecked="True"
+                                 Checked="Nav_Checked" Tag="0"/>
                     <RadioButton x:Name="NavScreens" Style="{StaticResource NavButton}"
-                                 Content="Экраны" Checked="Nav_Checked" Tag="1"/>
+                                 Content="{l:T nav_screens}" Checked="Nav_Checked" Tag="1"/>
                     <RadioButton x:Name="NavStats" Style="{StaticResource NavButton}"
-                                 Content="Статистика" Checked="Nav_Checked" Tag="2"/>
+                                 Content="{l:T nav_stats}" Checked="Nav_Checked" Tag="2"/>
+                    <RadioButton x:Name="NavAgent" Style="{StaticResource NavButton}"
+                                 Content="{l:T nav_agent}" Checked="Nav_Checked" Tag="3"/>
                     <RadioButton x:Name="NavSettings" Style="{StaticResource NavButton}"
-                                 Content="Настройки" Checked="Nav_Checked" Tag="3"/>
+                                 Content="{l:T nav_settings}" Checked="Nav_Checked" Tag="4"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -59,9 +66,9 @@
             <!-- ================================================= обзор -->
             <ScrollViewer x:Name="PageOverview" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <TextBlock Text="Обзор" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="{l:T nav_overview}" Style="{StaticResource PageTitle}"/>
                     <TextBlock x:Name="OverviewHint" Style="{StaticResource Caption}"
-                               Text="всё, что блок знает прямо сейчас" Margin="0,0,0,18"/>
+                               Text="{l:T overview_hint}" Margin="0,0,0,18"/>
 
                     <ItemsControl x:Name="ProblemList" Margin="0,0,0,14">
                         <ItemsControl.ItemTemplate>
@@ -85,7 +92,7 @@
                     <UniformGrid Columns="3" Rows="1">
                         <Border Style="{StaticResource Card}" Margin="0,0,7,0">
                             <StackPanel>
-                                <TextBlock Text="ВОЗДУХ" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T card_air}" Style="{StaticResource CardTitle}"/>
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock x:Name="Co2Value" Text="—" Style="{StaticResource Metric}"/>
                                     <TextBlock Text="ppm" Style="{StaticResource Caption}"
@@ -98,7 +105,7 @@
 
                         <Border Style="{StaticResource Card}" Margin="7,0,7,0">
                             <StackPanel>
-                                <TextBlock Text="СТОЛ" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T card_desk}" Style="{StaticResource CardTitle}"/>
                                 <TextBlock x:Name="PresenceValue" Text="—" Style="{StaticResource Metric}"/>
                                 <TextBlock x:Name="PresenceCaption" Text="—"
                                            Style="{StaticResource Caption}" Margin="0,8,0,0"/>
@@ -107,7 +114,7 @@
 
                         <Border Style="{StaticResource Card}" Margin="7,0,0,0">
                             <StackPanel>
-                                <TextBlock Text="ЗА ОКНОМ" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T card_outside}" Style="{StaticResource CardTitle}"/>
                                 <TextBlock x:Name="WeatherValue" Text="—" Style="{StaticResource Metric}"/>
                                 <TextBlock x:Name="WeatherCaption" Text="—"
                                            Style="{StaticResource Caption}" Margin="0,8,0,0"/>
@@ -117,29 +124,29 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="КОМПЬЮТЕР" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T card_pc}" Style="{StaticResource CardTitle}"/>
                             <TextBlock x:Name="ActiveApp" Text="—" Style="{StaticResource Body}"
                                        FontSize="15" Margin="0,0,0,14"/>
                             <UniformGrid Columns="4" Rows="1">
                                 <StackPanel>
                                     <TextBlock x:Name="CpuLoad" Text="—" Style="{StaticResource Metric}"
                                                FontSize="22"/>
-                                    <TextBlock Text="процессор" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="{l:T pc_cpu}" Style="{StaticResource Caption}"/>
                                 </StackPanel>
                                 <StackPanel>
                                     <TextBlock x:Name="CpuTemp" Text="—" Style="{StaticResource Metric}"
                                                FontSize="22"/>
-                                    <TextBlock Text="его температура" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="{l:T pc_cpu_temp}" Style="{StaticResource Caption}"/>
                                 </StackPanel>
                                 <StackPanel>
                                     <TextBlock x:Name="GpuLoad" Text="—" Style="{StaticResource Metric}"
                                                FontSize="22"/>
-                                    <TextBlock Text="видеокарта" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="{l:T pc_gpu}" Style="{StaticResource Caption}"/>
                                 </StackPanel>
                                 <StackPanel>
                                     <TextBlock x:Name="GpuTemp" Text="—" Style="{StaticResource Metric}"
                                                FontSize="22"/>
-                                    <TextBlock Text="её температура" Style="{StaticResource Caption}"/>
+                                    <TextBlock Text="{l:T pc_gpu_temp}" Style="{StaticResource Caption}"/>
                                 </StackPanel>
                             </UniformGrid>
                         </StackPanel>
@@ -147,7 +154,7 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="БЛОК" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T card_board}" Style="{StaticResource CardTitle}"/>
                             <UniformGrid x:Name="BoardGrid" Columns="4" Rows="2"/>
                         </StackPanel>
                     </Border>
@@ -163,9 +170,9 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
-                    <TextBlock Text="Экраны" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="{l:T nav_screens}" Style="{StaticResource PageTitle}"/>
                     <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,18"
-                               Text="галочка включает экран, перетаскивание строки меняет порядок в карусели"/>
+                               Text="{l:T screens_hint}"/>
                 </StackPanel>
 
                 <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8">
@@ -225,9 +232,9 @@
                 </Border>
 
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,16,0,0">
-                    <Button x:Name="SaveScreens" Content="Применить на блоке"
+                    <Button x:Name="SaveScreens" Content="{l:T screens_apply}"
                             Style="{StaticResource Flat}" Click="SaveScreens_Click"/>
-                    <Button x:Name="ReloadScreens" Content="Обновить"
+                    <Button x:Name="ReloadScreens" Content="{l:T screens_reload}"
                             Style="{StaticResource Flat}" Margin="10,0,0,0"
                             Click="ReloadScreens_Click"/>
                     <TextBlock x:Name="ScreensNote" Style="{StaticResource Caption}"
@@ -239,32 +246,32 @@
             <ScrollViewer x:Name="PageStats" Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <TextBlock Text="Статистика" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="{l:T nav_stats}" Style="{StaticResource PageTitle}"/>
                     <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,18"
-                               Text="за сегодня, по данным блока"/>
+                               Text="{l:T stats_hint}"/>
 
                     <UniformGrid Columns="4" Rows="1">
                         <Border Style="{StaticResource Card}" Margin="0,0,7,0">
                             <StackPanel>
-                                <TextBlock Text="ЗА СТОЛОМ" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T stats_at_desk}" Style="{StaticResource CardTitle}"/>
                                 <TextBlock x:Name="AtDesk" Text="—" Style="{StaticResource Metric}"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}" Margin="7,0,7,0">
                             <StackPanel>
-                                <TextBlock Text="БЕЗ ПЕРЕРЫВА" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T stats_longest}" Style="{StaticResource CardTitle}"/>
                                 <TextBlock x:Name="Longest" Text="—" Style="{StaticResource Metric}"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}" Margin="7,0,7,0">
                             <StackPanel>
-                                <TextBlock Text="НАЖАТИЙ" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T stats_keys}" Style="{StaticResource CardTitle}"/>
                                 <TextBlock x:Name="Keys" Text="—" Style="{StaticResource Metric}"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource Card}" Margin="7,0,0,0">
                             <StackPanel>
-                                <TextBlock Text="КЛИКОВ" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="{l:T stats_clicks}" Style="{StaticResource CardTitle}"/>
                                 <TextBlock x:Name="Clicks" Text="—" Style="{StaticResource Metric}"/>
                             </StackPanel>
                         </Border>
@@ -272,7 +279,7 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="ПО ЧАСАМ" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T stats_by_hour}" Style="{StaticResource CardTitle}"/>
                             <ItemsControl x:Name="HourBars" Height="120">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
@@ -313,7 +320,7 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="ЧЕМ ЗАНЯТ" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T stats_by_category}" Style="{StaticResource CardTitle}"/>
                             <ItemsControl x:Name="CategoryList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
@@ -346,26 +353,124 @@
                 </StackPanel>
             </ScrollViewer>
 
+            <!-- ================================================= агент -->
+            <!-- Агент — отдельный процесс без окна. Всё, что раньше печаталось
+                 в его консоль, показывается здесь, и отсюда же им управляют. -->
+            <ScrollViewer x:Name="PageAgent" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="{l:T nav_agent}" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,18"
+                               Text="{l:T agent_hint}"/>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{l:T agent_state_title}" Style="{StaticResource CardTitle}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="AgentDot" Width="10" Height="10"
+                                         Fill="{StaticResource Dim}" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="AgentStatus" Text="—" Margin="10,0,0,0"
+                                           Style="{StaticResource Metric}" FontSize="22"/>
+                            </StackPanel>
+                            <TextBlock x:Name="AgentDetail" Style="{StaticResource Caption}"
+                                       Margin="20,4,0,0" TextWrapping="Wrap"/>
+
+                            <UniformGrid x:Name="AgentFacts" Columns="3" Rows="2" Margin="0,16,0,0"/>
+
+                            <Border x:Name="AgentTempsHint" Visibility="Collapsed"
+                                    Background="#FF2A2416" BorderBrush="{StaticResource Warn}"
+                                    BorderThickness="1" CornerRadius="8" Padding="12,9"
+                                    Margin="0,4,0,0">
+                                <TextBlock Text="{l:T agent_temps_hint}" TextWrapping="Wrap"
+                                           FontSize="12" Foreground="{StaticResource Fg}"/>
+                            </Border>
+                            <TextBlock x:Name="AgentError" Style="{StaticResource Caption}"
+                                       Foreground="{StaticResource Alert}" TextWrapping="Wrap"
+                                       Margin="0,8,0,0" Visibility="Collapsed"/>
+
+                            <WrapPanel Margin="0,14,0,0">
+                                <Button x:Name="AgentStart" Content="{l:T agent_start}"
+                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
+                                        Click="AgentStart_Click"/>
+                                <Button x:Name="AgentRestart" Content="{l:T agent_restart}"
+                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
+                                        Click="AgentRestart_Click"/>
+                                <Button x:Name="AgentStop" Content="{l:T agent_stop}"
+                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
+                                        Click="AgentStop_Click"/>
+                                <Button x:Name="AgentAdmin" Content="{l:T agent_start_admin}"
+                                        Style="{StaticResource Flat}" Margin="0,0,10,8"
+                                        Click="AgentAdmin_Click"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="AgentResult" Style="{StaticResource Caption}"
+                                       TextWrapping="Wrap"/>
+
+                            <CheckBox x:Name="AgentKeep" Content="{l:T agent_keep}" FontSize="13"
+                                      Margin="0,14,0,0" Click="AgentKeep_Click"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                       TextWrapping="Wrap" Text="{l:T agent_keep_note}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T agent_autostart_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock x:Name="AgentAutostart" Style="{StaticResource Body}"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                       TextWrapping="Wrap" Text="{l:T agent_autostart_note}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T agent_log_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBox x:Name="AgentLog" Style="{StaticResource Console}" Height="190"/>
+                            <Button Content="{l:T agent_log_open}" Style="{StaticResource Flat}"
+                                    HorizontalAlignment="Left" Margin="0,10,0,0"
+                                    Click="AgentLogOpen_Click"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T agent_probe_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
+                                       Text="{l:T agent_probe_note}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button x:Name="ProbeWindows" Content="{l:T agent_probe_windows}"
+                                        Style="{StaticResource Flat}" Tag="--windows"
+                                        Click="Probe_Click"/>
+                                <Button x:Name="ProbeSensors" Content="{l:T agent_probe_sensors}"
+                                        Style="{StaticResource Flat}" Tag="--list-sensors"
+                                        Margin="10,0,0,0" Click="Probe_Click"/>
+                            </StackPanel>
+                            <TextBox x:Name="AgentProbe" Style="{StaticResource Console}"
+                                     Height="190" Margin="0,12,0,0" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
             <!-- ============================================= настройки -->
             <ScrollViewer x:Name="PageSettings" Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <TextBlock Text="Настройки" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="{l:T nav_settings}" Style="{StaticResource PageTitle}"/>
                     <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,18"
-                               Text="настройки самого приложения; всё про экраны живёт на блоке"/>
+                               Text="{l:T settings_hint}"/>
 
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <TextBlock Text="ГДЕ ИСКАТЬ БЛОК" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T host_title}" Style="{StaticResource CardTitle}"/>
                             <StackPanel Orientation="Horizontal">
                                 <TextBox x:Name="HostBox" Width="260" FontSize="13"/>
                                 <TextBox x:Name="PortBox" Width="80" Margin="8,0,0,0" FontSize="13"/>
-                                <Button Content="Проверить" Style="{StaticResource Flat}"
+                                <Button Content="{l:T host_test}" Style="{StaticResource Flat}"
                                         Margin="10,0,0,0" Click="TestHost_Click"/>
                             </StackPanel>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Имя deskpi.local из Windows находится через раз — если связи нет, впиши адрес цифрами, его видно в веб-интерфейсе роутера."/>
+                                       TextWrapping="Wrap" Text="{l:T host_note}"/>
                             <TextBlock x:Name="TestResult" Style="{StaticResource Caption}"
                                        Margin="0,8,0,0"/>
                         </StackPanel>
@@ -373,38 +478,31 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="ЯЗЫК НАДПИСЕЙ НА БЛОКЕ" Style="{StaticResource CardTitle}"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <RadioButton x:Name="LangRu" GroupName="Lang" Content="Русский"
-                                             Foreground="{StaticResource Fg}" FontSize="13"
-                                             IsEnabled="False" Click="Language_Click" Tag="ru"/>
-                                <RadioButton x:Name="LangEn" GroupName="Lang" Content="English"
-                                             Foreground="{StaticResource Fg}" FontSize="13"
-                                             Margin="22,0,0,0" IsEnabled="False"
-                                             Click="Language_Click" Tag="en"/>
-                            </StackPanel>
+                            <TextBlock Text="{l:T lang_title}" Style="{StaticResource CardTitle}"/>
+                            <ComboBox x:Name="LangBox" Width="220" HorizontalAlignment="Left"
+                                      DisplayMemberPath="Name"
+                                      SelectionChanged="LangBox_Changed"/>
                             <TextBlock x:Name="LangState" Style="{StaticResource Body}"
-                                       Margin="0,10,0,0" Text="жду блок"/>
+                                       Margin="0,10,0,0"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Меняет надписи на экране блока, а не в этом окне. Названия окон, треков и сетей остаются как есть — это чужой текст, а не наш интерфейс."/>
+                                       TextWrapping="Wrap" Text="{l:T lang_note}"/>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="ГОРОД ДЛЯ ПОГОДЫ" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T city_title}" Style="{StaticResource CardTitle}"/>
                             <TextBlock x:Name="CityNow" Style="{StaticResource Body}"
-                                       Margin="0,2,0,0" Text="жду блок"/>
+                                       Margin="0,2,0,0" Text="{l:T link_waiting}"/>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                 <TextBox x:Name="CityBox" Width="300" FontSize="13"
                                          KeyDown="CityBox_KeyDown"/>
-                                <Button Content="Найти" Style="{StaticResource Flat}"
+                                <Button Content="{l:T city_find}" Style="{StaticResource Flat}"
                                         Margin="10,0,0,0" Click="CityFind_Click"/>
                             </StackPanel>
                             <TextBlock x:Name="CityNote" Style="{StaticResource Caption}"
                                        Margin="0,8,0,0" TextWrapping="Wrap"
-                                       Text="Впиши название и нажми «Найти» — ищется по всем населённым пунктам мира, не по списку крупных городов."/>
+                                       Text="{l:T city_note}"/>
                             <ListBox x:Name="CityList" Background="Transparent" BorderThickness="0"
                                      MaxHeight="190" Margin="0,8,0,0" Visibility="Collapsed"
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -445,7 +543,7 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                            <Button x:Name="CityApply" Content="Поставить на блок"
+                            <Button x:Name="CityApply" Content="{l:T city_apply}"
                                     Style="{StaticResource Flat}" HorizontalAlignment="Left"
                                     Margin="0,10,0,0" IsEnabled="False" Click="CityPick_Click"/>
                         </StackPanel>
@@ -453,14 +551,14 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="ЧУВСТВИТЕЛЬНОСТЬ ЭКРАНА" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="{l:T touch_title}" Style="{StaticResource CardTitle}"/>
                             <Grid Margin="0,4,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="туго" VerticalAlignment="Center"
+                                <TextBlock Grid.Column="0" Text="{l:T touch_hard}" VerticalAlignment="Center"
                                            Style="{StaticResource Caption}" Margin="0,0,12,0"/>
                                 <Slider x:Name="TouchSlider" Grid.Column="1"
                                         Minimum="2000" Maximum="15000"
@@ -468,65 +566,59 @@
                                         IsEnabled="False"
                                         Thumb.DragCompleted="TouchSlider_Done"
                                         ValueChanged="TouchSlider_Changed"/>
-                                <TextBlock Grid.Column="2" Text="легко" VerticalAlignment="Center"
+                                <TextBlock Grid.Column="2" Text="{l:T touch_easy}" VerticalAlignment="Center"
                                            Style="{StaticResource Caption}" Margin="12,0,0,0"/>
                             </Grid>
                             <TextBlock x:Name="TouchState" Style="{StaticResource Body}"
-                                       Margin="0,10,0,0" Text="жду блок"/>
+                                       Margin="0,10,0,0" Text="{l:T link_waiting}"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Экран блока резистивный: он меряет не касание, а насколько сильно прижались друг к другу два слоя. Ползунок задаёт, с какого прижатия считать это нажатием — вправо значит легче. Действует сразу, перезагружать блок не нужно."/>
+                                       TextWrapping="Wrap" Text="{l:T touch_note}"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Поднимать почти безопасно: у нетронутой панели ложных нажатий не возникает ни при каком пороге. Если всё же начало нажиматься само — ведите влево."/>
+                                       TextWrapping="Wrap" Text="{l:T touch_note_safe}"/>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="ЗАПУСК" Style="{StaticResource CardTitle}"/>
-                            <CheckBox x:Name="AutostartBox" Foreground="{StaticResource Fg}"
-                                      FontSize="13" Content="Запускать вместе с Windows"
-                                      Click="Autostart_Click"/>
-                            <CheckBox x:Name="MinimizedBox" Foreground="{StaticResource Fg}"
-                                      FontSize="13" Margin="0,10,0,0"
-                                      Content="Стартовать свёрнутым в трей"
-                                      Click="Minimized_Click"/>
-                            <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Приложение ждёт блок само: пока его нет в сети, оно тихо висит в трее и подключается, как только тот появится."/>
-                            <TextBlock x:Name="AgentAutostart" Style="{StaticResource Body}"
-                                       Margin="0,14,0,0"/>
-                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Агент поднимается задачей планировщика, а не обычным автозапуском: ему нужны права администратора, иначе не читаются температуры. Завести или снять — pc\autostart.ps1 от имени администратора."/>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
-                        <StackPanel>
-                            <TextBlock Text="КОПИИ БАЗЫ" Style="{StaticResource CardTitle}"/>
-                            <TextBlock x:Name="BackupState" Style="{StaticResource Body}"
-                                       Text="копий ещё нет"/>
+                            <TextBlock Text="{l:T calib_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
+                                       Text="{l:T calib_note}"/>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                <Button x:Name="BackupNow" Content="Снять копию сейчас"
+                                <Button x:Name="CalibStart" Content="{l:T calib_start}"
+                                        Style="{StaticResource Flat}" Click="CalibStart_Click"/>
+                                <Button x:Name="CalibCancel" Content="{l:T calib_cancel}"
+                                        Style="{StaticResource Flat}" Margin="10,0,0,0"
+                                        Visibility="Collapsed" Click="CalibCancel_Click"/>
+                            </StackPanel>
+                            <TextBlock x:Name="CalibState" Style="{StaticResource Body}"
+                                       Margin="0,10,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T startup_title}" Style="{StaticResource CardTitle}"/>
+                            <CheckBox x:Name="AutostartBox" FontSize="13"
+                                      Content="{l:T startup_autostart}" Click="Autostart_Click"/>
+                            <CheckBox x:Name="MinimizedBox" FontSize="13" Margin="0,10,0,0"
+                                      Content="{l:T startup_minimized}" Click="Minimized_Click"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
+                                       TextWrapping="Wrap" Text="{l:T startup_note}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{l:T backup_title}" Style="{StaticResource CardTitle}"/>
+                            <TextBlock x:Name="BackupState" Style="{StaticResource Body}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button x:Name="BackupNow" Content="{l:T backup_now}"
                                         Style="{StaticResource Flat}" Click="BackupNow_Click"/>
-                                <Button Content="Открыть папку" Style="{StaticResource Flat}"
+                                <Button Content="{l:T backup_open}" Style="{StaticResource Flat}"
                                         Margin="10,0,0,0" Click="OpenBackups_Click"/>
                             </StackPanel>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,12,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="История измерений живёт на карте памяти блока в единственном экземпляре, а карта — расходник. Приложение забирает базу раз в сутки и хранит последние семь копий."/>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
-                        <StackPanel>
-                            <TextBlock Text="АГЕНТ" Style="{StaticResource CardTitle}"/>
-                            <TextBlock x:Name="AgentState" Style="{StaticResource Body}"/>
-                            <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
-                                       TextWrapping="Wrap"
-                                       Text="Агент — отдельная программа, она снимает с компьютера нажатия, загрузку и температуры и отдаёт их блоку. Здесь видно, доходят ли его данные."/>
+                                       TextWrapping="Wrap" Text="{l:T backup_note}"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

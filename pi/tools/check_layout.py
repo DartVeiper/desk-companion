@@ -163,6 +163,10 @@ def main() -> None:
         screen = registry_mod.instantiate(entry)
         screens.append(screen)
         screens.extend(getattr(screen, "details", []) or [])
+    # Калибровка тача: в каталоге её нет, а подписи у неё длинные — итог
+    # с причиной отказа первым кандидатом уехал бы за край.
+    from check_language import calibration_screens
+    screens.extend(calibration_screens())
 
     out_dir = Path(__file__).resolve().parents[1] / "preview" / "вёрстка"
     if render:

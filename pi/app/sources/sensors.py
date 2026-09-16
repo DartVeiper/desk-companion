@@ -284,13 +284,41 @@ class TouchSource(Source):
     name = "touch"
     interval = 0.05
 
+    #: Столько отсчётов должно набраться за нажатие, чтобы калибровка его
+    #: приняла. Меньше — это дребезг или скользнувший палец, а не нажатие.
+    CAPTURE_MIN_SAMPLES = 3
+
+    #: Пауза после принятого нажатия. Палец отрывается не мгновенно, и без
+    #: паузы одно касание засчитывалось бы в два крестика подряд.
+    CAPTURE_SETTLE_S = 0.4
+
     def __init__(self, touch, recognizer) -> None:
         super().__init__()
         self.touch = touch
         self.recognizer = recognizer
         self._down = False
+        self._capture = None
+        self._samples: list[tuple[int, int]] = []
+        self._quiet_until = 0.0
+
+    @property
+    def capture(self):
+        """Куда отдавать сырые нажатия вместо жестов. None — жесты как обычно."""
+        return self._capture
+
+    @capture.setter
+    def capture(self, sink) -> None:
+        # Незавершённый жест выбрасываем в обе стороны. Иначе нажатие,
+        # начатое до калибровки, закончилось бы в ней тапом по карусели, а
+        # начатое в калибровке — жестом после неё.
+        self._down = False
+        self._samples = []
+        self._capture = sink
 
     def poll(self, state: State) -> bool:
+        if self._capture is not None:
+            return self._poll_capture()
+
         position = self.touch.position()
         if position is None:
             if self._down:
@@ -305,4 +333,26 @@ class TouchSource(Source):
             self._down = True
         # Само касание кадр не меняет: экран перерисуется, когда Director
         # обработает событие из шины.
+        return False
+
+    def _poll_capture(self) -> bool:
+        """Калибровка: копить сырые отсчёты нажатия, отдать медиану на отпускании.
+
+        Медиана, а не первый отсчёт: палец ложится на панель не сразу, и
+        начало нажатия — самая неточная его часть.
+        """
+        now = time.monotonic()
+        raw = self.touch.raw_press()
+        if raw is None:
+            if self._samples:
+                samples, self._samples = self._samples, []
+                if len(samples) >= self.CAPTURE_MIN_SAMPLES:
+                    xs = sorted(s[0] for s in samples)
+                    ys = sorted(s[1] for s in samples)
+                    self._quiet_until = now + self.CAPTURE_SETTLE_S
+                    self._capture((xs[len(xs) // 2], ys[len(ys) // 2]))
+                    return True
+            return False
+        if now >= self._quiet_until:
+            self._samples.append(raw)
         return False

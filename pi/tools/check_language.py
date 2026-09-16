@@ -57,6 +57,31 @@ def screens() -> list:
     # Экраны подробностей в списке не значатся — они висят на карточках.
     for screen in list(made):
         made.extend(getattr(screen, "details", []))
+    made.extend(calibration_screens())
+    return made
+
+
+def calibration_screens() -> list:
+    """Калибровка тача во всех видах: с крестиком и с каждым итогом.
+
+    В каталоге её нет — её вызывает приложение, — и без этой функции ни
+    одна проверка её бы не нарисовала: английский крестик был бы подписан
+    по-русски, и заметили бы это только на живом блоке.
+    """
+    from app import touch_calibration as calibration_mod
+
+    made = []
+    for result, detail in (
+        (None, ""),
+        ("done", "точность 3 px"),
+        ("failed", "нажатие ушло мимо крестика на 40 px — попробуй ещё раз"),
+        ("cancelled", "никто не нажимал три минуты"),
+        ("cancelled", "отменено кнопкой энкодера"),
+    ):
+        session = calibration_mod.Session(id="check")
+        if result is not None:
+            session.finish(result, detail)
+        made.append(calibration_mod.CalibrationScreen(session))
     return made
 
 

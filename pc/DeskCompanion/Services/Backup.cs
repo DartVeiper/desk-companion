@@ -75,7 +75,7 @@ public sealed class Backup
             var bytes = await _board.DownloadDatabaseAsync(token);
             if (bytes is null || bytes.Length == 0)
             {
-                LastError = _board.LastError ?? "плата отдала пустой файл";
+                LastError = _board.LastError ?? Lang.T("board_empty_file");
                 return false;
             }
             await File.WriteAllBytesAsync(partial, bytes, token);
