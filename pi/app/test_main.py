@@ -1217,5 +1217,14 @@ else:
     check("без sklearn модель молчит", model.score(make_window())[0], False)
     print("    --  scikit-learn не установлен: обучение Режима 6 пропущено")
 
+print("\nВизитка для поиска в сети")
+import dashboard_server  # noqa: E402
+
+hello = dashboard_server.api_hello()
+# Эту строку ищет приложение на ПК (Discovery.AppName). Разойдутся — блок
+# перестанет находиться, и никакой ошибки об этом не будет.
+check("называется так, как ищет приложение", hello["app"], "desk-companion")
+check("и называет себя по имени в сети", bool(hello["name"]), True)
+
 print(f"\n  провалов: {failed}")
 raise SystemExit(1 if failed else 0)

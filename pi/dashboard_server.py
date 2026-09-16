@@ -234,6 +234,25 @@ def save_settings(payload: dict) -> dict:
     return api_settings()
 
 
+#: Чем блок представляется приложению, которое ищет его в сети. Строка
+#: нарочно своя, а не «ok»: на порту 843 в чужой сети может отвечать что
+#: угодно, и принимать это за блок нельзя.
+HELLO_APP = "desk-companion"
+
+
+def api_hello() -> dict:
+    """Визитка для поиска в сети.
+
+    Приложение на ПК, не найдя блок по сохранённому адресу, обходит свою
+    подсеть и спрашивает каждый адрес. Ответ должен быть мгновенным и
+    дешёвым — без базы и без снимка с диска: адресов двести пятьдесят, и
+    лишняя сотня миллисекунд на каждом сложилась бы в заметную паузу.
+    """
+    import socket
+
+    return {"app": HELLO_APP, "name": socket.gethostname()}
+
+
 def api_touch_calibration(language: str = "ru") -> dict:
     """На каком шаге калибровка тача. Причину неудачи — на языке клиента."""
     state = touch_calibration.read_state()
@@ -850,6 +869,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/live": lambda: api_live(q.get("lang", "ru")),
             "/api/settings": lambda: api_settings(q.get("lang", "ru")),
             "/api/touch-calibration": lambda: api_touch_calibration(q.get("lang", "ru")),
+            "/api/hello": api_hello,
             "/api/events": lambda: api_events(int(q.get("limit", 50))),
         }
 
