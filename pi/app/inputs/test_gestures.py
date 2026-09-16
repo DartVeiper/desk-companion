@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import inputs.gestures as gestures
 from inputs.events import Action, EventBus
 from inputs.gestures import GestureRecognizer
 
@@ -61,8 +62,62 @@ def main() -> int:
         got_txt = got.name if hasattr(got, "name") else (got or "игнор")
         print(f"  [{'ok  ' if ok else 'FAIL'}] {name:30} ждём {exp_txt:8} получили {got_txt}")
 
-    print(f"\n  {len(CASES) - failed} из {len(CASES)} прошло")
+    stuck = stuck_cases()
+    for name, got, expected in stuck:
+        ok = got == expected
+        if not ok:
+            failed += 1
+        print(f"  [{'ok  ' if ok else 'FAIL'}] {name:30} ждём {expected} получили {got}")
+
+    total = len(CASES) + len(stuck)
+    print(f"\n  {total - failed} из {total} прошло")
     return 1 if failed else 0
+
+
+class FakeClock:
+    """Часы, которые идут только по команде: ждать восемь секунд по-настоящему
+    ради одной проверки незачем."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def stuck_cases() -> list:
+    """Касание, которое не отпускают, не держит полосу удержания вечно."""
+    real, clock = gestures.time, FakeClock()
+    gestures.time = clock
+    out = []
+    try:
+        bus = EventBus()
+        rec = GestureRecognizer(bus, WIDTH)
+        rec.on_down(240, 200)
+        clock.now += (gestures.STUCK_MS - 100) / 1000
+        out.append(("до предела полоса идёт", rec.held_ms() > 0, True))
+        clock.now += 0.2
+        rec.on_move(241, 201)
+        out.append(("за пределом полоса пропадает", rec.held_ms(), 0.0))
+        out.append(("касание помечено ложным", rec.stuck, True))
+        rec.on_up()
+        out.append(("ложное отпускание без события", bus.poll(), None))
+        out.append(("метка снята отпусканием", rec.stuck, False))
+
+        rec.on_down(60, 200)
+        clock.now += 0.1
+        rec.on_up()
+        event = bus.poll()
+        out.append(("следующий тап работает", event.action if event else None, Action.TAP))
+
+        rec.on_down(240, 200)
+        rec.cancel()
+        out.append(("отменённый жест без полосы", rec.held_ms(), 0.0))
+        rec.on_up()
+        out.append(("и без события", bus.poll(), None))
+    finally:
+        gestures.time = real
+    return out
 
 
 if __name__ == "__main__":

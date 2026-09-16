@@ -264,8 +264,7 @@ def open_encoder(cfg: dict, bus: EventBus):
 def _add_encoder(hardware: "Hardware", config: dict, bus: EventBus) -> None:
     encoder = open_encoder(config["encoder"], bus)
     hardware.encoder = encoder
-    hardware.hold_providers.append(
-        lambda: encoder.button.held_ms(time.monotonic() * 1000))
+    hardware.hold_providers.append(lambda: encoder.held_ms(time.monotonic() * 1000))
 
 
 def _add_touch(hardware: "Hardware", config: dict, bus: EventBus,

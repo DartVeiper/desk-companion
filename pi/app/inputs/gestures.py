@@ -28,6 +28,15 @@ HOLD_MS = 700       # п.9 плана: короткое и долгое долж
 SETTINGS_MS = 3000
 TAP_MAX_MOVE = 25   # px: разброс в пределах дрожания пальца
 
+#: Дольше этого нажатие не держат. Настройки открываются на трёх секундах,
+#: и полоса удержания говорит «можно отпускать»; касание, которое не
+#: отпускают восемь секунд, — это уже не палец, а что-то, давящее на
+#: панель: край корпуса, натянутый шлейф. Такое касание забываем до
+#: отпускания. Иначе полоса висела бы поверх притушенного экрана, пока
+#: давление не пропадёт, и блок выглядел бы намертво зависшим — 17.09 его
+#: так и описали: «картинка наслаивается краями на прошлую».
+STUCK_MS = 8000
+
 # Свайп
 SWIPE_MIN_DX = 60    # px: короче — это тап, а не свайп
 SWIPE_MAX_DY = 90    # px: вертикальный увод больше — жест не горизонтальный
@@ -46,20 +55,35 @@ class GestureRecognizer:
         self._start: tuple[int, int] | None = None
         self._last: tuple[int, int] | None = None
         self._t0 = 0.0
+        #: Касание признано ложным (см. STUCK_MS) и ждёт отпускания.
+        self.stuck = False
 
     def on_down(self, x: int, y: int) -> None:
         self._start = self._last = (x, y)
         self._t0 = time.monotonic()
+        self.stuck = False
 
     def on_move(self, x: int, y: int) -> None:
         if self._start is not None:
             self._last = (x, y)
+            self._expire()
 
     def held_ms(self) -> float:
         """Сколько держат прямо сейчас. Нужно индикатору прогресса на экране."""
+        self._expire()
         return 0.0 if self._start is None else (time.monotonic() - self._t0) * 1000.0
 
+    def cancel(self) -> None:
+        """Забыть незаконченный жест, ничего не отправив в шину."""
+        self._start = self._last = None
+
+    def _expire(self) -> None:
+        if self._start is not None and (time.monotonic() - self._t0) * 1000.0 >= STUCK_MS:
+            self.cancel()
+            self.stuck = True
+
     def on_up(self) -> None:
+        self.stuck = False
         if self._start is None or self._last is None:
             return
 

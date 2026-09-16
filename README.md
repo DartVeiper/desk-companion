@@ -9,7 +9,7 @@ weather, watches the air in the room, knows whether you are at your desk,
 and keeps track of what you do on your computer. One case, one power cable.
 
 Everything is drawn and tested **without the hardware**: screens render in a
-browser, sensors are replaced by stubs, and 462 checks run on any machine
+browser, sensors are replaced by stubs, and 486 checks run on any machine
 with Python. Only debugged code goes to the board.
 
 ---
@@ -267,7 +267,7 @@ Checks worth running after any interface change:
 | `py tools/walk_menu.py` | walks every state of the menu: dead ends, and places more than three actions away from the carousel |
 | `py ../pc/check_strings.py` | a string missing from one of the desktop app's languages, or a translation that lost a `{0}` — which does not crash, it just prints the sentence without the number |
 | `py tools/latency.py` | what the delay from "the sensor saw it" to "it is on screen" is made of |
-| six `test_*.py` files | 462 checks, all without hardware |
+| six `test_*.py` files | 486 checks, all without hardware |
 
 ---
 

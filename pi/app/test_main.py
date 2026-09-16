@@ -21,7 +21,7 @@ from app import status as status_mod
 from app.db import Database
 from app.drivers import ld2410, scd41
 from app.inputs.events import Action, EventBus
-from app.inputs.gestures import GestureRecognizer
+from app.inputs.gestures import STUCK_MS, GestureRecognizer
 from app import hardware
 from app import theme
 from app.screens import clock as clock_mod
@@ -847,6 +847,30 @@ for _ in range(2):
 tap_event = tap_bus.poll()
 check("одиночное касание стало тапом", tap_event.action if tap_event else None, Action.TAP)
 check("координаты доехали", (tap_event.x, tap_event.y), (240, 160))
+
+# Касание, которое не отпускают, — край корпуса или шлейф, давящий на панель.
+# Полоса удержания поверх экрана висела бы, пока давление не пропадёт, и
+# блок выглядел бы зависшим.
+stuck_bus = EventBus()
+stuck_rec = GestureRecognizer(stuck_bus, 480)
+stuck_source = TouchSource(FakePanel([(240, 160)] * 3 + [None]), stuck_rec)
+stuck_source.poll(State())
+stuck_rec._t0 -= STUCK_MS / 1000 + 1   # «лежит» дольше предела
+stuck_source.poll(State())
+check("ложное касание замечено", (stuck_rec.stuck, stuck_source.stuck_presses), (True, 1))
+check("полоса удержания пропала", stuck_rec.held_ms(), 0.0)
+stuck_source.poll(State())
+check("о нём сказано один раз", stuck_source.stuck_presses, 1)
+stuck_source.poll(State())
+check("отпускание ложного касания ничего не шлёт", stuck_bus.poll(), None)
+
+# Калибровка включилась посреди касания: жест забывается целиком, а не
+# только флагом источника.
+switch_rec = GestureRecognizer(EventBus(), 480)
+switch_source = TouchSource(FakePanel([(240, 160)]), switch_rec)
+switch_source.poll(State())
+switch_source.capture = lambda press: None
+check("калибровка не оставляет полосу удержания", switch_rec.held_ms(), 0.0)
 
 print("\nНастройки поверх конфига")
 with tempfile.TemporaryDirectory() as tmp:

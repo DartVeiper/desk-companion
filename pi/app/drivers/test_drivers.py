@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.drivers import ld2410, scd41, xpt2046
-from app.drivers.encoder import (HOLD_MS, SETTINGS_MS, ButtonDecoder, Encoder,
-                                 QuadratureDecoder)
+from app.drivers.encoder import (HOLD_MS, LOST_RELEASE_MS, SETTINGS_MS, STUCK_MS,
+                                 ButtonDecoder, Encoder, QuadratureDecoder)
 from app.inputs.events import Action, EventBus
 
 failed = 0
@@ -176,6 +176,32 @@ check("отпускание без нажатия ничего не даёт", b
 b.press(5000)
 check("прогресс удержания виден", b.held_ms(5000 + 400), 400.0)
 
+# Отпускание, проглоченное антидребезгом: ножка давно отпущена, а нажатие
+# открыто — и полоса удержания висела бы на экране вечно.
+b = ButtonDecoder()
+b.press(6000)
+check("ножка отпущена, событие ещё в пути — нажатие живо",
+      b.held_ms(6100, pressed=False), 100.0)
+check("отпущена дольше выдержки — отпускание потеряно",
+      b.held_ms(6100 + LOST_RELEASE_MS, pressed=False), 0.0)
+check("потеря посчитана", b.lost_releases, 1)
+check("запоздавшее отпускание ничего не шлёт", b.release(6500), None)
+
+b.press(7000)
+b.held_ms(7050, pressed=False)
+b.held_ms(7100, pressed=True)
+check("дребезг посреди нажатия потерей не считается",
+      b.held_ms(7100 + LOST_RELEASE_MS, pressed=False), float(LOST_RELEASE_MS + 100))
+b.release(7400)
+
+b = ButtonDecoder()
+b.press(10000)
+check("кнопку держат дольше предела — полоса пропадает",
+      b.held_ms(10000 + STUCK_MS, pressed=True), 0.0)
+check("нажатие помечено залипшим", b.stuck, True)
+check("отпускание залипшей кнопки ничего не шлёт", b.release(10000 + STUCK_MS + 500), None)
+check("метка снята", b.stuck, False)
+
 print("\nЭнкодер: события в шину")
 bus = EventBus()
 enc = Encoder(bus)
@@ -188,6 +214,12 @@ check("обратный поворот -> PREV", bus.poll().action, Action.PREV)
 enc.on_press(0)
 enc.on_release(SETTINGS_MS + 100)
 check("долгое удержание -> SETTINGS", bus.poll().action, Action.SETTINGS)
+
+enc.read_pressed = lambda: False
+enc.on_press(20000)
+enc.held_ms(20010)
+check("энкодер сверяет нажатие с ножкой", enc.held_ms(20010 + LOST_RELEASE_MS), 0.0)
+check("и в шину ничего не уходит", bus.poll(), None)
 
 # ────────────────────────────────────────────────────────────── SCD41
 

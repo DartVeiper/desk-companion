@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from ..drivers import ld2410, scd41
+from ..inputs.gestures import STUCK_MS
 from ..stats import BREAK_MINUTES
 from ..radar_levels import Levels
 from ..state import State
@@ -387,6 +388,9 @@ class TouchSource(Source):
         self._capture = None
         self._samples: list[tuple[int, int]] = []
         self._quiet_until = 0.0
+        #: Сколько касаний признано ложными — держались дольше STUCK_MS.
+        self.stuck_presses = 0
+        self._stuck_reported = False
 
     @property
     def capture(self):
@@ -398,7 +402,12 @@ class TouchSource(Source):
         # Незавершённый жест выбрасываем в обе стороны. Иначе нажатие,
         # начатое до калибровки, закончилось бы в ней тапом по карусели, а
         # начатое в калибровке — жестом после неё.
+        # Распознаватель тоже: сбросив только свой флаг, источник оставлял
+        # ему открытое нажатие, и полоса удержания росла бы, пока не
+        # коснутся снова.
         self._down = False
+        if self.recognizer is not None:
+            self.recognizer.cancel()
         self._samples = []
         self._capture = sink
 
@@ -411,6 +420,7 @@ class TouchSource(Source):
             if self._down:
                 self.recognizer.on_up()
                 self._down = False
+                self._stuck_reported = False
             return False
 
         if self._down:
@@ -418,6 +428,14 @@ class TouchSource(Source):
         else:
             self.recognizer.on_down(*position)
             self._down = True
+        if self.recognizer.stuck and not self._stuck_reported:
+            self._stuck_reported = True
+            self.stuck_presses += 1
+            # В журнал — один раз на касание: по этой строке видно, что
+            # «зависание» было ложным касанием, и где его искать — в
+            # корпусе, шлейфе или слишком лёгком пороге чувствительности.
+            print(f"  тач: касание в {position[0]},{position[1]} держится дольше "
+                  f"{STUCK_MS // 1000} с — не учитываю до отпускания")
         # Само касание кадр не меняет: экран перерисуется, когда Director
         # обработает событие из шины.
         return False

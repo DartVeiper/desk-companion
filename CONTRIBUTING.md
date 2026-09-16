@@ -16,7 +16,7 @@ Pillow; numpy and scikit-learn are optional.
 
 ```bash
 cd pi
-py app/test_main.py          # and the five other test_*.py files, 462 checks
+py app/test_main.py          # and the five other test_*.py files, 486 checks
 py tools/check_imports.py    # every import resolves to a name that exists
 py tools/check_config.py     # config keys and code agree, both directions
 py tools/check_layout.py     # no text off-screen, four states of data

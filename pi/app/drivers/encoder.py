@@ -41,6 +41,14 @@ MIN_STEPS = 2
 # различаться на практике).
 HOLD_MS = 700
 SETTINGS_MS = 3000
+#: Дольше этого кнопку не держат — см. STUCK_MS у тача, причина та же:
+#: зажатая корпусом или замкнутая кнопка держала бы полосу удержания на
+#: экране бесконечно.
+STUCK_MS = 8000
+#: Сколько кнопка должна пробыть отпущенной без события отпускания, чтобы
+#: считать это событие потерянным. С запасом выше выдержки антидребезга
+#: (20 мс) и задержки обработчика: настоящее отпускание успевает прийти.
+LOST_RELEASE_MS = 150
 
 
 class QuadratureDecoder:
@@ -101,15 +109,49 @@ class ButtonDecoder:
 
     def __init__(self) -> None:
         self._down_at: float | None = None
+        #: Когда впервые увидели кнопку отпущенной при незакрытом нажатии.
+        self._up_seen_at: float | None = None
+        #: Нажатие держится дольше STUCK_MS и забыто до отпускания.
+        self.stuck = False
+        #: Сколько раз отпускание потерялось и нажатие сбросили по уровню.
+        self.lost_releases = 0
 
     def press(self, timestamp_ms: float) -> None:
         self._down_at = timestamp_ms
+        self._up_seen_at = None
+        self.stuck = False
 
-    def held_ms(self, now_ms: float) -> float:
-        """Сколько держат прямо сейчас — для индикатора прогресса."""
-        return 0.0 if self._down_at is None else max(0.0, now_ms - self._down_at)
+    def held_ms(self, now_ms: float, pressed: bool | None = None) -> float:
+        """Сколько держат прямо сейчас — для индикатора прогресса.
+
+        pressed — что показывает ножка прямо сейчас, если её можно прочитать.
+        По нему ловится потерянное отпускание: gpiozero с выдержкой
+        антидребезга умеет проглотить последний фронт, и тогда нажатие
+        остаётся открытым навсегда, а с ним и полоса удержания на экране.
+        Действие для такого нажатия не отправляем: когда кнопку отпустили на
+        самом деле, неизвестно, и долгим оно могло и не быть.
+        """
+        if self._down_at is None:
+            return 0.0
+        if pressed is False:
+            if self._up_seen_at is None:
+                self._up_seen_at = now_ms
+            elif now_ms - self._up_seen_at >= LOST_RELEASE_MS:
+                self._down_at = self._up_seen_at = None
+                self.lost_releases += 1
+                return 0.0
+        else:
+            self._up_seen_at = None
+        held = max(0.0, now_ms - self._down_at)
+        if held >= STUCK_MS:
+            self._down_at = None
+            self.stuck = True
+            return 0.0
+        return held
 
     def release(self, timestamp_ms: float) -> Action | None:
+        self.stuck = False
+        self._up_seen_at = None
         if self._down_at is None:
             return None
         held = timestamp_ms - self._down_at
@@ -134,6 +176,25 @@ class Encoder:
         # молча перестают вызываться. Уровни при этом читаются нормально,
         # так что снаружи это выглядит как исправное железо без событий.
         self.pins: tuple = ()
+        #: Как прочитать кнопку прямо сейчас. None — нечем, только события.
+        self.read_pressed = None
+
+    def held_ms(self, now_ms: float) -> float:
+        """Сколько держат кнопку — с проверкой по самой ножке."""
+        pressed = None
+        if self.read_pressed is not None:
+            try:
+                pressed = bool(self.read_pressed())
+            except Exception:  # noqa: BLE001 — индикатор не повод падать
+                pressed = None
+        lost, stuck = self.button.lost_releases, self.button.stuck
+        held = self.button.held_ms(now_ms, pressed)
+        if self.button.lost_releases != lost:
+            print("  энкодер: отпускание кнопки потерялось — нажатие сброшено")
+        if self.button.stuck and not stuck:
+            print(f"  энкодер: кнопку держат дольше {STUCK_MS // 1000} с — "
+                  f"не учитываю до отпускания")
+        return held
 
     def close(self) -> None:
         for pin in self.pins:
@@ -180,6 +241,10 @@ def attach(bus: EventBus, clk: int = 17, dt: int = 27, sw: int = 22) -> Encoder:
     dt_pin.when_deactivated = rotated
     sw_pin.when_pressed = lambda: encoder.on_press(time.monotonic() * 1000)
     sw_pin.when_released = lambda: encoder.on_release(time.monotonic() * 1000)
+
+    # Уровень ножки, а не последнее событие: по нему ловится потерянное
+    # отпускание (см. ButtonDecoder.held_ms).
+    encoder.read_pressed = lambda: sw_pin.is_pressed
 
     # Ровно то, ради чего заведено поле: пережить выход из этой функции.
     encoder.pins = (clk_pin, dt_pin, sw_pin)
