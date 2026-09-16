@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Principal;
 using DeskCompanion.Collection;
@@ -31,6 +32,11 @@ public static class Autostart
 
     private const string OldAgentTask = "DeskCompanion Agent";
     private const string OldAgentProcess = "DeskAgent";
+
+    // Драйвер датчиков, который LibreHardwareMonitor ставил для агента:
+    // служба называется по имени exe, файл лежит рядом с ним.
+    private const string OldAgentDriver = "R0DeskAgent";
+    private const string OldAgentDriverFile = "DeskAgent.sys";
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValue = "DeskCompanion";
 
@@ -264,6 +270,21 @@ public static class Autostart
             {
                 // Задачи нет — и хорошо.
             }
+            if (DeleteDriverService(OldAgentDriver))
+                ComputerLog.Info(Lang.T("log_old_driver_removed"));
+        }
+
+        // Файл драйвера занят, пока драйвер загружен, — то есть до
+        // перезагрузки после того, как агент его поставил. Поэтому пробуем
+        // при каждом запуске: однажды получится.
+        try
+        {
+            if (System.IO.Path.GetDirectoryName(Environment.ProcessPath) is { Length: > 0 } folder)
+                System.IO.File.Delete(System.IO.Path.Combine(folder, OldAgentDriverFile));
+        }
+        catch (Exception)
+        {
+            // Занят или нет прав — в следующий раз.
         }
 
         if (removeRunKey) RemoveRunValue();
@@ -293,6 +314,50 @@ public static class Autostart
         if (alive) ComputerLog.Error(Lang.T("log_old_agent_alive"));
         return alive;
     }
+
+    /// <summary>
+    /// Снять службу драйвера. Загруженный драйвер Windows удаляет, когда он
+    /// выгружается, то есть при перезагрузке, — до тех пор он работает, и
+    /// температуры приложение читает через него же.
+    /// </summary>
+    /// <returns>Служба была и помечена на удаление.</returns>
+    private static bool DeleteDriverService(string name)
+    {
+        var manager = OpenSCManager(null, null, ScManagerConnect);
+        if (manager == IntPtr.Zero) return false;
+        try
+        {
+            var service = OpenService(manager, name, DeleteAccess);
+            if (service == IntPtr.Zero) return false;
+            try
+            {
+                return DeleteService(service);
+            }
+            finally
+            {
+                CloseServiceHandle(service);
+            }
+        }
+        finally
+        {
+            CloseServiceHandle(manager);
+        }
+    }
+
+    private const uint ScManagerConnect = 0x0001;
+    private const uint DeleteAccess = 0x10000;
+
+    [DllImport("advapi32.dll", EntryPoint = "OpenSCManagerW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenSCManager(string? machine, string? database, uint access);
+
+    [DllImport("advapi32.dll", EntryPoint = "OpenServiceW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenService(IntPtr manager, string name, uint access);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool DeleteService(IntPtr service);
+
+    [DllImport("advapi32.dll")]
+    private static extern bool CloseServiceHandle(IntPtr handle);
 
     private static bool HasRunValue()
     {

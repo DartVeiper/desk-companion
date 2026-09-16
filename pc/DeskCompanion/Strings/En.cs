@@ -190,6 +190,7 @@ public static partial class Strings
         ["log_no_temps"] = "temperature sensors are unavailable — administrator rights needed",
         ["log_stopped"] = "collection stopped",
         ["log_old_task_removed"] = "the old agent's task was removed",
+        ["log_old_driver_removed"] = "the old agent's sensor driver was removed — Windows drops it at the next restart",
         ["log_old_agent_stopped"] = "the old agent was stopped — the app does its job now",
         ["log_old_agent_alive"] = "the old agent runs with rights this app does not have — it could not be stopped",
         ["log_board_found"] = "device found on the network: {0}",
