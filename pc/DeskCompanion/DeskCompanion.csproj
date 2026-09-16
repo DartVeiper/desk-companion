@@ -13,6 +13,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DeskCompanion</AssemblyName>
+    <Version>0.3.0</Version>
     <RootNamespace>DeskCompanion</RootNamespace>
     <ApplicationIcon></ApplicationIcon>
     <!-- Один файл при публикации: ставить приложение из десятка dll неудобно,

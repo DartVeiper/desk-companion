@@ -153,6 +153,10 @@ public partial class MainWindow : Window
     public MainWindow(Settings settings, Collector? collector, bool passive = false)
     {
         InitializeComponent();
+        // Версия — в заголовке: по ней понятно, какая сборка запущена, когда
+        // что-то пошло не так.
+        var version = typeof(MainWindow).Assembly.GetName().Version;
+        if (version is not null) Title = $"Desk Companion {version.Major}.{version.Minor}.{version.Build}";
         _settings = settings;
         _collector = collector;
         _passive = passive;
