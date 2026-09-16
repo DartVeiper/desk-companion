@@ -142,10 +142,18 @@ public sealed class Board
         if (doc is null) return null;
 
         var root = doc.RootElement;
-        var env = root.GetProperty("env");
-        var weather = root.GetProperty("weather");
-        var pc = root.GetProperty("pc");
-        var health = root.GetProperty("health");
+        // Дашборд жив, а сервис блока нет — перезапускается или упал. Тогда
+        // в ответе одна подсказка и ни одного раздела. 17.09 окно падало
+        // ровно на этом: разделы читались так, будто они есть всегда, и
+        // перезапуск сервиса на блоке закрывал приложение на компьютере.
+        if (Section(root, "env") is not { } env)
+        {
+            LastError = Lang.T("board_not_running");
+            return null;
+        }
+        var weather = Section(root, "weather") ?? Empty;
+        var pc = Section(root, "pc") ?? Empty;
+        var health = Section(root, "health") ?? Empty;
 
         var live = new Live
         {
@@ -176,7 +184,7 @@ public sealed class Board
             Ld2410Ok = Bool(health, "ld2410_ok"),
         };
 
-        if (root.TryGetProperty("radar", out var radar) && radar.ValueKind == JsonValueKind.Object)
+        if (Section(root, "radar") is { } radar)
         {
             live.DistanceCm = Int(radar, "distance_cm");
             live.Radar = new Radar
@@ -194,7 +202,8 @@ public sealed class Board
             };
         }
 
-        if (root.TryGetProperty("problems", out var problems))
+        if (root.TryGetProperty("problems", out var problems)
+            && problems.ValueKind == JsonValueKind.Array)
             foreach (var item in problems.EnumerateArray())
                 live.Problems.Add((Str(item, "label") ?? "", Str(item, "detail") ?? "",
                                    Bool(item, "critical")));
@@ -218,14 +227,12 @@ public sealed class Board
             Streak = Int(root, "streak") ?? 0,
         };
 
-        if (root.TryGetProperty("hours", out var hours))
-        {
-            var list = hours.EnumerateArray().Select(h => h.GetInt32()).ToArray();
-            for (var i = 0; i < Math.Min(24, list.Length); i++) today.Hours[i] = list[i];
-        }
-        if (root.TryGetProperty("by_category", out var cats))
+        var hours = Ints(root, "hours");
+        for (var i = 0; i < Math.Min(24, hours.Length); i++) today.Hours[i] = hours[i];
+        if (Section(root, "by_category") is { } cats)
             foreach (var pair in cats.EnumerateObject())
-                today.ByCategory[pair.Name] = pair.Value.GetInt32();
+                if (pair.Value.ValueKind == JsonValueKind.Number)
+                    today.ByCategory[pair.Name] = (int)pair.Value.GetDouble();
 
         return today;
     }
@@ -234,7 +241,9 @@ public sealed class Board
     {
         using var doc = await GetAsync(Localized("/api/settings"), token);
         if (doc is null) return null;
-        if (!doc.RootElement.TryGetProperty("screens", out var screens)) return null;
+        if (doc.RootElement.ValueKind != JsonValueKind.Object
+            || !doc.RootElement.TryGetProperty("screens", out var screens)
+            || screens.ValueKind != JsonValueKind.Array) return null;
 
         return screens.EnumerateArray()
             .Select(s => new ScreenEntry(Str(s, "key") ?? "", Str(s, "label") ?? "",
@@ -252,9 +261,9 @@ public sealed class Board
     {
         using var doc = await GetAsync("/api/settings", token);
         if (doc is null) return null;
-        if (!doc.RootElement.TryGetProperty("values", out var values)) return null;
-        if (!values.TryGetProperty("touch_sensitivity", out var found)) return null;
-        return found.TryGetInt32(out var number) ? number : null;
+        return Section(doc.RootElement, "values") is { } values
+            ? Int(values, "touch_sensitivity")
+            : null;
     }
 
     public Task<bool> SaveTouchSensitivityAsync(int value,
@@ -266,8 +275,7 @@ public sealed class Board
     {
         using var doc = await GetAsync("/api/settings", token);
         if (doc is null) return null;
-        if (!doc.RootElement.TryGetProperty("values", out var values)) return null;
-        return Str(values, "language");
+        return Section(doc.RootElement, "values") is { } values ? Str(values, "language") : null;
     }
 
     public Task<bool> SaveLanguageAsync(string code, CancellationToken token = default)
@@ -278,12 +286,10 @@ public sealed class Board
     {
         using var doc = await GetAsync("/api/settings", token);
         if (doc is null) return null;
-        if (!doc.RootElement.TryGetProperty("values", out var values)) return null;
-        if (!values.TryGetProperty("city_lat", out var lat) ||
-            !values.TryGetProperty("city_lon", out var lon)) return null;
-        if (lat.ValueKind != JsonValueKind.Number || lon.ValueKind != JsonValueKind.Number)
+        if (Section(doc.RootElement, "values") is not { } values) return null;
+        if (Double(values, "city_lat") is not { } lat || Double(values, "city_lon") is not { } lon)
             return null;
-        return new Place(Str(values, "city_name") ?? "", "", lat.GetDouble(), lon.GetDouble());
+        return new Place(Str(values, "city_name") ?? "", "", lat, lon);
     }
 
     public Task<bool> SaveCityAsync(Place place, CancellationToken token = default)
@@ -412,26 +418,41 @@ public sealed class Board
 
     // ------------------------------------------------------------ разбор
     // Плата имеет право прислать null в любом поле: датчик мог не успеть
-    // прогреться, агент — не запуститься. Поэтому всё читается мягко и
-    // возвращает nullable, а не бросает на первом прочерке.
+    // прогреться, сбор — не запуститься. А блок другой версии — прислать
+    // совсем другое. Поэтому всё читается мягко и возвращает nullable, а не
+    // бросает на первом прочерке: исключение отсюда закрыло бы приложение.
+
+    //: Раздел, которого нет, — пустой: читать из него можно, найдётся ничего.
+    private static readonly JsonElement Empty = MakeEmpty();
+
+    private static JsonElement MakeEmpty()
+    {
+        using var doc = JsonDocument.Parse("{}");
+        return doc.RootElement.Clone();
+    }
+
+    /// <summary>Вложенный объект. null — его нет или это не объект.</summary>
+    private static JsonElement? Section(JsonElement parent, string name) =>
+        Field(parent, name) is { ValueKind: JsonValueKind.Object } v ? v : null;
+
+    private static JsonElement? Field(JsonElement parent, string name) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var v)
+            ? v : null;
 
     private static string? Str(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
-            ? v.GetString() : null;
+        Field(parent, name) is { ValueKind: JsonValueKind.String } v ? v.GetString() : null;
 
     private static int? Int(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
-            ? (int)v.GetDouble() : null;
+        Field(parent, name) is { ValueKind: JsonValueKind.Number } v ? (int)v.GetDouble() : null;
 
     private static double? Double(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
-            ? v.GetDouble() : null;
+        Field(parent, name) is { ValueKind: JsonValueKind.Number } v ? v.GetDouble() : null;
 
     private static bool Bool(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+        Field(parent, name) is { ValueKind: JsonValueKind.True };
 
     private static int[] Ints(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array
+        Field(parent, name) is { ValueKind: JsonValueKind.Array } v
             ? v.EnumerateArray()
                .Select(x => x.ValueKind == JsonValueKind.Number ? (int)x.GetDouble() : 0)
                .ToArray()

@@ -29,6 +29,7 @@ public static partial class Strings
         ["board_no_host"] = "that address is not on the network",
         ["board_no_link"] = "cannot reach the device",
         ["board_status"] = "the device answered {0}",
+        ["board_not_running"] = "the device answers, but its service is not running — it may be restarting",
         ["board_empty_file"] = "the device returned an empty file",
         ["not_saved"] = "not saved",
 
@@ -192,6 +193,7 @@ public static partial class Strings
         ["log_old_agent_stopped"] = "the old agent was stopped — the app does its job now",
         ["log_old_agent_alive"] = "the old agent runs with rights this app does not have — it could not be stopped",
         ["log_board_found"] = "device found on the network: {0}",
+        ["log_window_error"] = "window error, the app keeps running: {0}",
         ["log_autostart_moved"] = "the previous version's autostart was moved to a Scheduled Task — now with rights",
 
         // --------------------------------------------------------- settings

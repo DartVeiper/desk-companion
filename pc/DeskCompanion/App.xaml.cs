@@ -27,6 +27,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        DispatcherUnhandledException += OnWindowError;
         _settings = Settings.Load();
         // Язык — до создания окна: иначе оно на мгновение нарисовалось бы
         // на русском и перескочило бы.
@@ -105,6 +106,32 @@ public partial class App : Application
         _instance?.Dispose();
         _instance = null;
         base.OnExit(e);
+    }
+
+    private string _lastWindowError = "";
+    private DateTime _lastWindowErrorAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Ошибка в окне — в журнал, а не конец приложения.
+    /// </summary>
+    /// <remarks>
+    /// Приложение живёт неделями в трее и собирает данные для блока. Упасть
+    /// из-за одного странного ответа — значит оставить блок без данных до
+    /// следующего входа в систему, и никто этого не заметит: 17.09 так и
+    /// вышло, стоило перезапустить сервис на блоке. Журнал делает ошибку
+    /// видимой на странице «Компьютер»; одна и та же ошибка пишется не чаще
+    /// раза в минуту — окно опрашивает блок каждую секунду.
+    /// </remarks>
+    private void OnWindowError(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        var text = $"{e.Exception.GetType().Name}: {e.Exception.Message}";
+        if (text != _lastWindowError || DateTime.Now - _lastWindowErrorAt > TimeSpan.FromMinutes(1))
+        {
+            _lastWindowError = text;
+            _lastWindowErrorAt = DateTime.Now;
+            ComputerLog.Error(Lang.T("log_window_error", text));
+        }
+        e.Handled = true;
     }
 
     private static string? Argument(string[] args, string name)
