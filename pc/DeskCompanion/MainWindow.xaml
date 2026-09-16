@@ -593,8 +593,11 @@
                                 <TextBox x:Name="HostBox" Width="220" FontSize="13" Margin="0,0,8,6"/>
                                 <TextBox x:Name="PortBox" Width="70" FontSize="13" Margin="0,0,10,6"/>
                                 <Button Content="{l:T host_test}"
-                                        Style="{StaticResource Flat}" Margin="0,0,0,6"
+                                        Style="{StaticResource Flat}" Margin="0,0,10,6"
                                         Click="TestHost_Click"/>
+                                <Button x:Name="FindBoard" Content="{l:T host_find}"
+                                        Style="{StaticResource Flat}" Margin="0,0,0,6"
+                                        Click="FindBoard_Click"/>
                             </WrapPanel>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0"
                                        TextWrapping="Wrap" Text="{l:T host_note}"/>

@@ -343,6 +343,8 @@ public partial class MainWindow : Window
         _live = live;
         ApplyLive(live);
         if (PageRadar.IsVisible) ApplyRadar(live);
+        if (live is null) MaybeFindBoard();
+        else _misses = 0;
 
         // Сводка за день меняется минутами, а не секундами: дёргать её
         // каждую секунду — зря будить и сеть, и базу на блоке.
@@ -1086,6 +1088,74 @@ public partial class MainWindow : Window
         finally
         {
             ProbeWindows.IsEnabled = ProbeSensors.IsEnabled = true;
+        }
+    }
+
+    // ------------------------------------------------------ поиск блока
+
+    private bool _finding;
+    private int _misses;
+    private DateTime _lastAutoFind = DateTime.MinValue;
+
+    /// <summary>Как часто искать блок самому, пока он не отвечает.</summary>
+    private static readonly TimeSpan AutoFindEvery = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Поискать блок, если он молчит. Не с первого промаха: блок мог просто
+    /// перезагружаться, и обходить ради этого сеть — лишний шум. Три промаха
+    /// подряд — уже повод.
+    /// </summary>
+    private async void MaybeFindBoard()
+    {
+        if (_passive || _finding) return;
+        if (++_misses < 3) return;
+        if (DateTime.Now - _lastAutoFind < AutoFindEvery) return;
+        _lastAutoFind = DateTime.Now;
+        await FindBoardAsync(manual: false);
+    }
+
+    private async void FindBoard_Click(object sender, RoutedEventArgs e)
+    {
+        if (_passive || _finding) return;
+        await FindBoardAsync(manual: true);
+    }
+
+    /// <param name="manual">Искать попросил человек — тогда ход поиска
+    /// виден под полем адреса. Сам по себе поиск идёт молча.</param>
+    private async Task FindBoardAsync(bool manual)
+    {
+        _finding = true;
+        FindBoard.IsEnabled = false;
+        try
+        {
+            if (manual) ShowNote(TestResult, Lang.T("host_testing"), "Dim");
+            var progress = new Progress<(int Done, int Total)>(p =>
+            {
+                if (manual) ShowNote(TestResult, Lang.T("host_finding", p.Done, p.Total), "Dim");
+            });
+            var found = await Discovery.FindAsync(_settings.Host, _settings.Port, progress);
+            if (found is null)
+            {
+                if (manual) ShowNote(TestResult, Lang.T("host_not_found"), "Alert");
+                return;
+            }
+
+            if (!string.Equals(found, _settings.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.Host = _board.Host = found;
+                _settings.Save();
+                HostBox.Text = found;
+                _collector?.Reconnect();
+                ComputerLog.Info(Lang.T("log_board_found", found));
+            }
+            _misses = 0;
+            if (manual) ShowNote(TestResult, Lang.T("host_found", found), "Ok");
+            Refresh();
+        }
+        finally
+        {
+            _finding = false;
+            FindBoard.IsEnabled = true;
         }
     }
 
