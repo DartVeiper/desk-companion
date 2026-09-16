@@ -393,6 +393,61 @@ split.port = FakePort(whole[7:])
 split._next_at = 0
 check("вторая половина склеилась", split.tick(split_state), True)
 
+print("\nПрисутствие держится движением у стола, а не дальними зонами")
+# 16.09 радар десять с половиной часов считал хозяина за столом, пока того
+# не было дома: в полутора-двух метрах что-то шевелилось. Модуль честно
+# говорил «цель есть» — но цель была не у стола.
+
+
+def gate_report(state_code: int, moving: list[int], static: list[int]) -> ld2410.Report:
+    return ld2410.Report(target_state=state_code, engineering=True,
+                         moving_gates=moving, static_gates=static)
+
+
+calm = [0] * 9
+desk = Ld2410Source(FakePort(b""), near_thresholds=[35, 28, 20, 19, 19, 100, 100, 100, 100])
+check("берутся пороги только ближних зон", desk.near_thresholds, [35, 28])
+
+typing = gate_report(ld2410.BOTH, [60, 10, 5, 0, 0, 0, 0, 0, 0], [0, 0, 90, 60, 0, 0, 0, 0, 0])
+check("движение у стола — человек за столом", desk._at_desk(typing), True)
+
+# Ушёл. У стола тихо, но во второй зоне что-то двигается — модуль всё ещё
+# видит цель.
+curtain = gate_report(ld2410.MOVING, [3, 5, 80, 10, 0, 0, 0, 0, 0], calm)
+check("сразу после ухода присутствие ещё держится", desk._at_desk(curtain), True)
+desk._near_motion_at -= desk.HOLD_WITHOUT_NEAR_MOTION + 1
+check("без движения у стола дальняя зона присутствие не держит",
+      desk._at_desk(curtain), False)
+check("это замечено", desk._ghost, True)
+
+check("вернулся и шевельнулся — снова за столом", desk._at_desk(typing), True)
+check("призрак забыт", desk._ghost, False)
+
+# Сидит неподвижно: модуль видит статику, движения у стола нет. Короче
+# удержания — человек на месте.
+still = gate_report(ld2410.STATIC, [10, 8, 0, 0, 0, 0, 0, 0, 0], [0, 0, 95, 70, 30, 0, 0, 0, 0])
+check("неподвижный человек в пределах удержания — за столом", desk._at_desk(still), True)
+
+nobody = gate_report(ld2410.NO_TARGET, [90, 90, 0, 0, 0, 0, 0, 0, 0], calm)
+check("модуль говорит «никого» — никого, даже при шуме у стола",
+      desk._at_desk(nobody), False)
+
+trusting = Ld2410Source(FakePort(b""))
+check("без порогов — решает модуль, как раньше", trusting._at_desk(curtain), True)
+basic = ld2410.Report(target_state=ld2410.MOVING)
+check("в базовом режиме энергий нет — решает модуль", desk._at_desk(basic), True)
+
+# Через сам источник: решение правила доходит до состояния стола.
+ghost_state = State(now=datetime(2026, 8, 19, 12, 0))
+ghost_state.desk.presence = True
+desk._near_motion_at -= desk.HOLD_WITHOUT_NEAR_MOTION + 1
+desk.port = FakePort(b"")
+desk.last_report = None
+check("ушёл при шевелящейся шторе — стол пуст",
+      ghost_state.desk.note_presence(desk._at_desk(curtain), ghost_state.now, BREAK_MINUTES),
+      True)
+check("и состояние это отражает", ghost_state.desk.presence, False)
+
 
 # Настройка модуля. Проверяем именно тот путь, которым идёт сервис: раньше
 # у источника был свой метод configure(), его никто не звал, а инженерный

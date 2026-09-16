@@ -132,8 +132,11 @@ def open_radar(cfg: dict):
     # Копилка уровней лежит рядом с кодом, в data/. Путь задаём отсюда:
     # источник не должен знать, где на этой машине живут файлы.
     levels = Path(__file__).resolve().parent.parent / "data" / "radar_levels.json"
+    # Пороги движения ближних зон — те же, что уходят в модуль. По ним
+    # источник решает, было ли движение у стола.
     source = Ld2410Source(port, engineering=cfg.get("engineering", True),
-                          levels_path=levels)
+                          levels_path=levels,
+                          near_thresholds=cfg.get("gate_moving"))
     source.levels = Levels.load(levels)
     source.setup_problems = _configure_radar(port, cfg)
     return source

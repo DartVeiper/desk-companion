@@ -180,11 +180,41 @@ class Ld2410Source(Source):
     #: писать незачем, реже — обидно терять статистику при выключении.
     SAVE_EVERY = 1800.0
 
+    #: Сколько ближних ворот — это «у стола». Ворота по 75 см, так что две
+    #: зоны — полтора метра: сидящий за столом человек всегда в них.
+    NEAR_GATES = 2
+
+    #: Сколько держать присутствие без движения у стола.
+    #:
+    #: Радар смотрит на три с лишним метра и считает человеком любое
+    #: движение там. 16.09 это стоило десяти с половиной часов «за столом»
+    #: при пустой комнате: в полутора-двух метрах что-то шевелилось, пока
+    #: хозяина не было дома, — и стрик обнулился за «сидение без перерыва».
+    #:
+    #: Правило простое: человек за столом — это тот, кто недавно двигался у
+    #: стола. Сидящий шевелится почти всё время (по накопленной статистике
+    #: движение у стола выше порога три четверти времени присутствия), и три
+    #: минуты без единого движения рядом — это уже не он. Дальние зоны
+    #: по-прежнему нужны: неподвижного человека радар видит статикой, а её
+    #: ближние ворота не умеют. Но держать присутствие они могут только вслед
+    #: за движением у стола, а не сами по себе.
+    HOLD_WITHOUT_NEAR_MOTION = 180.0
+
     def __init__(self, port, engineering: bool = False,
-                 levels_path: Path | None = None) -> None:
+                 levels_path: Path | None = None,
+                 near_thresholds: list[int] | None = None) -> None:
         super().__init__()
         self.port = port
         self.engineering = engineering
+        #: Пороги движения ближних ворот — те же, что залиты в модуль.
+        #: Без них правило про движение у стола не работает, и присутствие
+        #: решает один модуль, как раньше.
+        self.near_thresholds = list(near_thresholds or [])[:self.NEAR_GATES]
+        self._near_motion_at = time.monotonic()
+        #: Присутствие сейчас держится только дальними зонами — и уже
+        #: дольше, чем положено. Помним, чтобы сказать об этом в журнал один
+        #: раз, а не десять раз в секунду.
+        self._ghost = False
         #: Сколько раз каждая зона показывала каждый уровень энергии.
         #: Из этой копилки калибровка потом достаёт и фон пустой комнаты,
         #: и уровень присутствия — не требуя ставить опыт.
@@ -239,7 +269,43 @@ class Ld2410Source(Source):
             self._maybe_save()
         # Время удержания настраивается в самом модуле (set_max_gates),
         # поэтому мигание гасится там, а не здесь.
-        return state.desk.note_presence(report.present, state.now, BREAK_MINUTES)
+        return state.desk.note_presence(self._at_desk(report), state.now, BREAK_MINUTES)
+
+    def _at_desk(self, report: ld2410.Report) -> bool:
+        """Решение модуля, но присутствие без движения у стола — не дольше
+        HOLD_WITHOUT_NEAR_MOTION. См. пояснение у этой константы."""
+        if not report.present:
+            self._ghost = False
+            return False
+        gates = report.moving_gates
+        if not self.near_thresholds or len(gates) < len(self.near_thresholds):
+            # Энергий по воротам нет — базовый режим модуля. Судить не по
+            # чему, остаётся верить модулю.
+            return True
+
+        now = time.monotonic()
+        if any(energy >= threshold
+               for energy, threshold in zip(gates, self.near_thresholds)):
+            self._near_motion_at = now
+            self._ghost = False
+            return True
+
+        if now - self._near_motion_at <= self.HOLD_WITHOUT_NEAR_MOTION:
+            return True
+        if not self._ghost:
+            self._ghost = True
+            # Какая зона держит присутствие — по сильнейшему сигналу любого
+            # рода. Это первое, что захочется знать, чтобы найти виновника:
+            # штору, вентилятор, дверь.
+            statics = report.static_gates or [0] * len(gates)
+            far = max(range(self.NEAR_GATES, len(gates)),
+                      key=lambda g: max(gates[g], statics[g]), default=None)
+            where = ("" if far is None
+                     else f", а присутствие держит зона {far} ({far * 75}–{(far + 1) * 75} см)")
+            print(f"  радар: у стола движения нет "
+                  f"{self.HOLD_WITHOUT_NEAR_MOTION / 60:.0f} мин{where} — "
+                  f"не считаю это человеком")
+        return False
 
     def _maybe_save(self) -> None:
         now = time.monotonic()
