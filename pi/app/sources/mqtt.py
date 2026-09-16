@@ -42,11 +42,16 @@ def _truthy(payload: str) -> bool:
     return payload.strip().lower() in ("1", "true", "on", "yes")
 
 
-def apply_message(state: State, topic: str, payload: str, now: datetime | None = None) -> bool:
+def apply_message(state: State, topic: str, payload: str, now: datetime | None = None,
+                  retained: bool = False) -> bool:
     """Применить сообщение к состоянию. True — что-то изменилось.
 
-    Битый JSON от агента не должен ронять сервис: часы обязаны показывать
-    время, даже когда на игровом ПК творится ерунда.
+    Битый JSON от компьютера не должен ронять сервис: часы обязаны
+    показывать время, даже когда на игровом ПК творится ерунда.
+
+    retained — сообщение отдал брокер из сохранённых при подписке, а не
+    прислал компьютер только что. Такое уже было учтено до перезапуска
+    сервиса, и считать его заново нельзя.
     """
     now = now or state.now
     pc = state.pc
@@ -71,8 +76,11 @@ def apply_message(state: State, topic: str, payload: str, now: datetime | None =
             return True
 
         if topic == ACTIVITY:
-            pc.keystrokes = int(data.get("keys", 0))
-            pc.mouse_clicks = int(data.get("clicks", 0))
+            keys, clicks = int(data.get("keys", 0)), int(data.get("clicks", 0))
+            if retained:
+                pc.keystrokes, pc.mouse_clicks = keys, clicks
+            else:
+                pc.note_activity(keys, clicks)
             # Агент шлёт признак отошедшего, экран активности его показывает,
             # а разбор его молча терял — значок AFK не зажигался никогда.
             pc.afk = bool(data.get("afk", False))
@@ -120,7 +128,7 @@ class MqttSource(Source):
         super().__init__()
         self.host, self.port, self.client_id = host, port, client_id
         self._client = None
-        self._pending: list[tuple[str, str]] = []
+        self._pending: list[tuple[str, str, bool]] = []
         self.connected = False
 
     # ------------------------------------------------------------ транспорт
@@ -157,7 +165,8 @@ class MqttSource(Source):
         self.connected = False
 
     def _on_message(self, _client, _userdata, message) -> None:
-        self._pending.append((message.topic, message.payload.decode("utf-8", "replace")))
+        self._pending.append((message.topic, message.payload.decode("utf-8", "replace"),
+                              bool(message.retain)))
 
     # ----------------------------------------------------------- источник
 
@@ -171,8 +180,8 @@ class MqttSource(Source):
 
         batch, self._pending = self._pending, []
         changed = False
-        for topic, payload in batch:
-            changed |= apply_message(state, topic, payload, state.now)
+        for topic, payload, retained in batch:
+            changed |= apply_message(state, topic, payload, state.now, retained)
         return changed
 
     def publish(self, topic: str, payload: str, retain: bool = True) -> None:

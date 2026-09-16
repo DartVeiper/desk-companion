@@ -157,13 +157,14 @@ class Recorder:
             #
             # Ноль здесь честнее последнего известного: мы не знаем, что
             # делал выключенный компьютер, и знать не можем.
-            online = state.pc_online
+            #
+            # Нажатия — только пришедшие за эту минуту, см. Pc.take_activity.
+            # Занятие же — состояние, а не событие: у выключенного
+            # компьютера его нет.
+            keys, clicks = state.pc.take_activity()
             self.storage.add_activity_minute(
-                self._minute,
-                state.pc.keystrokes if online else 0,
-                state.pc.mouse_clicks if online else 0,
-                0, state.desk.presence,
-                state.pc.category if online else "",
+                self._minute, keys, clicks, 0, state.desk.presence,
+                state.pc.category if state.pc_online else "",
             )
         self._minute = minute
 

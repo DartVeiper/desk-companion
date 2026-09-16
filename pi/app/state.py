@@ -143,6 +143,27 @@ class Pc:
     track_artist: str = ""
     track_title: str = ""
     track_playing: bool = False
+    #: Нажатия и клики, пришедшие после последней записанной минуты.
+    #:
+    #: Раньше в историю каждую минуту писалось последнее полученное число —
+    #: пришло новое сообщение или нет. Стоило сбору на компьютере
+    #: перезапуститься, и одна и та же минута ложилась в базу трижды:
+    #: «662, 662, 662». Теперь пришедшее копится и при записи забирается,
+    #: так что без нового сообщения в минуту ложится ноль.
+    keys_unrecorded: int = 0
+    clicks_unrecorded: int = 0
+
+    def note_activity(self, keys: int, clicks: int) -> None:
+        """Пришла минута ввода: показать её и отложить для записи."""
+        self.keystrokes, self.mouse_clicks = keys, clicks
+        self.keys_unrecorded += keys
+        self.clicks_unrecorded += clicks
+
+    def take_activity(self) -> tuple[int, int]:
+        """Забрать накопленное для записи в историю."""
+        taken = (self.keys_unrecorded, self.clicks_unrecorded)
+        self.keys_unrecorded = self.clicks_unrecorded = 0
+        return taken
 
     @property
     def track(self) -> str:

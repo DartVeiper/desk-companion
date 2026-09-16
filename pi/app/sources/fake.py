@@ -91,8 +91,13 @@ class FakePcSource(Source):
         app, category = self.APPS[self._app]
         pc = state.pc
         pc.active_app, pc.category = app, category
-        pc.keystrokes = random.randint(20, 220) if category == "code" else random.randint(0, 60)
-        pc.mouse_clicks = random.randint(5, 70)
+        # Как настоящий компьютер: одна минута ввода раз в минуту. Иначе
+        # поддельные нажатия копились бы на каждом опросе, и история на
+        # машине разработки выходила бы в десятки раз больше настоящей.
+        if self._elapsed % 60 < self.interval:
+            pc.note_activity(
+                random.randint(20, 220) if category == "code" else random.randint(0, 60),
+                random.randint(5, 70))
         pc.audio_active = category != "code"
         pc.gpu_load = round(30 + 60 * abs(math.sin(self._elapsed / 30)))
         pc.gpu_temp = round(55 + 25 * abs(math.sin(self._elapsed / 30)))

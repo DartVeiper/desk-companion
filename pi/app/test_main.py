@@ -241,6 +241,15 @@ check("активное окно", (mqtt.apply_message(mst, mqtt.ACTIVE_APP,
 check("категория", mst.pc.category, "code")
 check("агрегат ввода", (mqtt.apply_message(mst, mqtt.ACTIVITY,
       '{"keys":142,"clicks":38,"mouse_px":8420}'), mst.pc.keystrokes), (True, 142))
+check("и отложен для записи", mst.pc.keys_unrecorded, 142)
+# Сохранённое сообщение брокер отдаёт при каждой подписке — то есть при
+# каждом перезапуске сервиса. Оно уже было учтено до перезапуска.
+mqtt.apply_message(mst, mqtt.ACTIVITY, '{"keys":500,"clicks":1}', retained=True)
+check("сохранённое брокером — показано", mst.pc.keystrokes, 500)
+check("но второй раз не учтено", mst.pc.keys_unrecorded, 142)
+check("запись забирает накопленное", mst.pc.take_activity(), (142, 38))
+check("и обнуляет", mst.pc.keys_unrecorded, 0)
+mst.pc.keystrokes = 142
 check("звук включился",
       (mqtt.apply_message(mst, mqtt.AUDIO, "1"), mst.pc.audio_active), (True, True))
 check("тот же звук второй раз — не изменение",
@@ -621,7 +630,7 @@ with tempfile.TemporaryDirectory() as tmp:
     st = State(now=datetime(2026, 9, 15, 0, 6))
     st.health.clock_synced = True
     st.desk.presence = True
-    st.pc.keystrokes, st.pc.mouse_clicks = 313, 135
+    st.pc.note_activity(313, 135)
     st.pc.category = "game"
     st.pc.last_heartbeat = st.now          # ПК ещё жив
     keeper.tick(st)
@@ -632,8 +641,33 @@ with tempfile.TemporaryDirectory() as tmp:
         "SELECT * FROM activity_minute ORDER BY ts DESC LIMIT 1").fetchone()
     check("пока ПК на связи — цифры пишутся", row["keystrokes"], 313)
 
-    # ПК выключили: сердцебиение протухло, а значения в состоянии остались.
+    # Компьютер на связи, но нового сообщения за минуту не пришло — сбор
+    # перезапускался. Раньше в историю ложилось прежнее число ещё раз.
+    st.now = datetime(2026, 9, 15, 0, 7, 30)
+    st.pc.last_heartbeat = st.now
     st.now = datetime(2026, 9, 15, 0, 8)
+    keeper.tick(st)
+    row = offline_db.conn.execute(
+        "SELECT * FROM activity_minute ORDER BY ts DESC LIMIT 1").fetchone()
+    check("нет нового сообщения — ноль, а не повтор прежнего", row["keystrokes"], 0)
+    check("на экране прежнее число остаётся", st.pc.keystrokes, 313)
+    check("занятие при живом ПК пишется", row["category"], "game")
+
+    # Две минуты ввода пришли в одну минуту блока — обе и учитываются.
+    st.pc.note_activity(40, 4)
+    st.pc.note_activity(60, 6)
+    st.now = datetime(2026, 9, 15, 0, 8, 30)
+    st.pc.last_heartbeat = st.now
+    st.now = datetime(2026, 9, 15, 0, 9)
+    keeper.tick(st)
+    row = offline_db.conn.execute(
+        "SELECT * FROM activity_minute ORDER BY ts DESC LIMIT 1").fetchone()
+    check("два сообщения за минуту — сумма, а не последнее", row["keystrokes"], 100)
+
+    # ПК выключили: сердцебиение протухло, а значения в состоянии остались.
+    st.now = datetime(2026, 9, 15, 0, 30)
+    keeper.tick(st)
+    st.now = datetime(2026, 9, 15, 0, 31)
     keeper.tick(st)
     row = offline_db.conn.execute(
         "SELECT * FROM activity_minute ORDER BY ts DESC LIMIT 1").fetchone()
